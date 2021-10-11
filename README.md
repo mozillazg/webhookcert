@@ -35,6 +35,8 @@ import "github.com/mozillazg/webhookcert/pkg/cert"
 	}
 ```
 
+RealWorld example: [example](https://github.com/mozillazg/echo-k8s-webhook/blob/08aabec89bb8aac3edeeffe72ebd7b9bbaa5d40e/main.go#L85-L115)
+
 ## Permission
 
 ```yaml
