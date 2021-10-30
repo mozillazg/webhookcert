@@ -1,5 +1,8 @@
 # webhookcert
 
+[![CI](https://github.com/mozillazg/webhookcert/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/mozillazg/webhookcert/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/mozillazg/webhookcert/badge.svg?branch=master)](https://coveralls.io/github/mozillazg/webhookcert?branch=master)
+
 A simple cert solution for writing Kubernetes Webhook Server.
 
 ## Usage
