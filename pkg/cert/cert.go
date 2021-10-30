@@ -14,8 +14,10 @@ import (
 )
 
 type CertOption struct {
-	CAName               string
-	CAOrganizations      []string
+	CAName          string
+	CAOrganizations []string
+	Hosts           []string
+	// Deprecated: user Hosts instead
 	DNSNames             []string
 	CommonName           string
 	CertDir              string
@@ -107,9 +109,16 @@ func (w *WebhookCert) ensureCertsMounted(ctx context.Context) error {
 	return nil
 }
 
-func (c CertOption) GetCertValidityDuration() time.Duration {
+func (c CertOption) getCertValidityDuration() time.Duration {
 	if c.CertValidityDuration == 0 {
 		return certValidityDuration
 	}
 	return c.CertValidityDuration
+}
+
+func (c CertOption) getHots() []string {
+	hosts := []string{}
+	hosts = append(hosts, c.DNSNames...)
+	hosts = append(hosts, c.Hosts...)
+	return hosts
 }
