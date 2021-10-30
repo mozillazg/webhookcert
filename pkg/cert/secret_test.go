@@ -60,7 +60,7 @@ func TestCertManager_ensureSecret(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, s, secretClient.gotCreateSecret)
 	assert.Equal(t, s.Name, "test")
-	assert.Greater(t, len(s.Data), 3)
+	assert.GreaterOrEqual(t, len(s.Data), 3)
 }
 
 func TestCertManager_ensureSecret_use_exist_secret(t *testing.T) {
@@ -69,6 +69,7 @@ func TestCertManager_ensureSecret_use_exist_secret(t *testing.T) {
 		secretInfo: SecretInfo{
 			Name:      "test",
 			Namespace: "",
+			saveCaKey: true,
 		},
 		certOpt: CertOption{
 			CAName:               "ca",

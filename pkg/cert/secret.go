@@ -35,12 +35,16 @@ type keyPairArtifacts struct {
 }
 
 type SecretInfo struct {
-	Name       string
-	Namespace  string
+	Name      string
+	Namespace string
+
 	caCertName string
 	caKeyName  string
 	certName   string
 	keyName    string
+
+	// save ca key to secret?
+	saveCaKey bool
 }
 
 type certManager struct {
@@ -125,7 +129,9 @@ func (c *certManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtif
 	secret.Data[c.secretInfo.getCACertName()] = caArtifacts.certPEM
 	secret.Data[c.secretInfo.getCAKeyName()] = caArtifacts.keyPEM
 	secret.Data[c.secretInfo.getCertName()] = cert
-	secret.Data[c.secretInfo.getKeyName()] = key
+	if c.secretInfo.saveCaKey {
+		secret.Data[c.secretInfo.getKeyName()] = key
+	}
 }
 
 func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairArtifacts, error) {
@@ -133,24 +139,28 @@ func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairA
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
 	}
-	keyPem, ok := secret.Data[c.secretInfo.getCAKeyName()]
-	if !ok {
-		return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caKeyName))
-	}
 	caCert, _, err := decoder.DecodePemCert(caPem)
 	if err != nil {
 		return nil, errors.Errorf("while parsing CA cert: %w", err)
 	}
-	key, _, err := decoder.DecodePemPrivateKey(keyPem)
-	if err != nil {
-		return nil, errors.Errorf("while parsing CA key: %w", err)
-	}
-	return &keyPairArtifacts{
+	kp := &keyPairArtifacts{
 		cert:    caCert,
 		certPEM: caPem,
-		keyPEM:  keyPem,
-		key:     key,
-	}, nil
+	}
+
+	if c.secretInfo.saveCaKey {
+		keyPem, ok := secret.Data[c.secretInfo.getCAKeyName()]
+		if !ok {
+			return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caKeyName))
+		}
+		key, _, err := decoder.DecodePemPrivateKey(keyPem)
+		if err != nil {
+			return nil, errors.Errorf("while parsing CA key: %w", err)
+		}
+		kp.keyPEM = keyPem
+		kp.key = key
+	}
+	return kp, nil
 }
 
 func (c *certManager) createCACert(begin, end time.Time) (*keyPairArtifacts, error) {
