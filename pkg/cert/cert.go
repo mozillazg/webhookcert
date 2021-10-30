@@ -80,7 +80,7 @@ func (w *WebhookCert) ensureCert(ctx context.Context) error {
 	if err != nil {
 		return errors.Errorf("parse secret: %w", err)
 	}
-	err = w.webhookmanager.ensureCA(ctx, ka.CertPEM)
+	err = w.webhookmanager.ensureCA(ctx, ka.certPEM)
 	if err == nil {
 		klog.Info("ensure webhook ca config success")
 	}

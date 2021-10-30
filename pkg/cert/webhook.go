@@ -98,7 +98,7 @@ func (t WebhookType) gvs() (*schema.GroupVersionResource, error) {
 			Resource: "mutatingwebhookconfigurations",
 		}, nil
 	}
-	return nil, errors.Errorf("unkown type: %s", t)
+	return nil, errors.Errorf("unknown type: %s", t)
 }
 
 func injectCertToWebhook(wh *unstructured.Unstructured, caPem []byte) (bool, error) {

@@ -28,11 +28,11 @@ const (
 	certValidityDuration = time.Hour * 24 * 365 * 10
 )
 
-type KeyPairArtifacts struct {
-	Cert    *x509.Certificate
-	Key     *rsa.PrivateKey
-	CertPEM []byte
-	KeyPEM  []byte
+type keyPairArtifacts struct {
+	cert    *x509.Certificate
+	key     *rsa.PrivateKey
+	certPEM []byte
+	keyPEM  []byte
 }
 
 type SecretInfo struct {
@@ -90,7 +90,7 @@ func (c *CertManager) ensureSecretWithoutRetry(ctx context.Context) (*corev1.Sec
 }
 
 func (c *CertManager) newSecret() (*corev1.Secret, error) {
-	var caArtifacts *KeyPairArtifacts
+	var caArtifacts *keyPairArtifacts
 	now := time.Now()
 	begin := now.Add(-1 * time.Hour)
 	end := now.Add(c.certOpt.getCertValidityDuration())
@@ -113,17 +113,17 @@ func (c *CertManager) newSecret() (*corev1.Secret, error) {
 	return secret, nil
 }
 
-func (c *CertManager) populateSecret(cert, key []byte, caArtifacts *KeyPairArtifacts, secret *corev1.Secret) {
+func (c *CertManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtifacts, secret *corev1.Secret) {
 	if secret.Data == nil {
 		secret.Data = make(map[string][]byte)
 	}
-	secret.Data[c.secretInfo.getCACertName()] = caArtifacts.CertPEM
-	secret.Data[c.secretInfo.getCAKeyName()] = caArtifacts.KeyPEM
+	secret.Data[c.secretInfo.getCACertName()] = caArtifacts.certPEM
+	secret.Data[c.secretInfo.getCAKeyName()] = caArtifacts.keyPEM
 	secret.Data[c.secretInfo.getCertName()] = cert
 	secret.Data[c.secretInfo.getKeyName()] = key
 }
 
-func (c *CertManager) buildArtifactsFromSecret(secret *corev1.Secret) (*KeyPairArtifacts, error) {
+func (c *CertManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairArtifacts, error) {
 	caPem, ok := secret.Data[c.secretInfo.getCACertName()]
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
@@ -140,15 +140,15 @@ func (c *CertManager) buildArtifactsFromSecret(secret *corev1.Secret) (*KeyPairA
 	if err != nil {
 		return nil, errors.Errorf("while parsing CA key: %w", err)
 	}
-	return &KeyPairArtifacts{
-		Cert:    caCert,
-		CertPEM: caPem,
-		KeyPEM:  keyPem,
-		Key:     key,
+	return &keyPairArtifacts{
+		cert:    caCert,
+		certPEM: caPem,
+		keyPEM:  keyPem,
+		key:     key,
 	}, nil
 }
 
-func (c *CertManager) createCACert(begin, end time.Time) (*KeyPairArtifacts, error) {
+func (c *CertManager) createCACert(begin, end time.Time) (*keyPairArtifacts, error) {
 	hosts := []string{}
 	hosts = append(hosts, c.certOpt.DNSNames...)
 	hosts = append(hosts, c.certOpt.Hosts...)
@@ -171,10 +171,10 @@ func (c *CertManager) createCACert(begin, end time.Time) (*KeyPairArtifacts, err
 	if err != nil {
 		return nil, errors.Errorf("encoding PEM: %w", err)
 	}
-	return &KeyPairArtifacts{Cert: cert, Key: key, CertPEM: certPem, KeyPEM: keyPem}, nil
+	return &keyPairArtifacts{cert: cert, key: key, certPEM: certPem, keyPEM: keyPem}, nil
 }
 
-func (c *CertManager) createCertPEM(ca *KeyPairArtifacts, begin, end time.Time) ([]byte, []byte, error) {
+func (c *CertManager) createCertPEM(ca *keyPairArtifacts, begin, end time.Time) ([]byte, []byte, error) {
 	hosts := []string{}
 	hosts = append(hosts, c.certOpt.DNSNames...)
 	hosts = append(hosts, c.certOpt.Hosts...)
@@ -185,8 +185,8 @@ func (c *CertManager) createCertPEM(ca *KeyPairArtifacts, begin, end time.Time) 
 		NotBefore:     begin,
 		NotAfter:      end,
 		RSAKeySize:    2048,
-		ParentCert:    ca.Cert,
-		ParentKey:     ca.Key,
+		ParentCert:    ca.cert,
+		ParentKey:     ca.key,
 	})
 	if err != nil {
 		return nil, nil, errors.Errorf("generating cert: %w", err)
