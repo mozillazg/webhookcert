@@ -43,8 +43,8 @@ type SecretInfo struct {
 	certName   string
 	keyName    string
 
-	// save ca key to secret?
-	saveCaKey bool
+	// dont save ca key to secret?
+	dontSaveCaKey bool
 }
 
 type certManager struct {
@@ -127,7 +127,7 @@ func (c *certManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtif
 		secret.Data = make(map[string][]byte)
 	}
 	secret.Data[c.secretInfo.getCACertName()] = caArtifacts.certPEM
-	if c.secretInfo.saveCaKey {
+	if !c.secretInfo.dontSaveCaKey {
 		secret.Data[c.secretInfo.getCAKeyName()] = caArtifacts.keyPEM
 	}
 	secret.Data[c.secretInfo.getCertName()] = cert
@@ -148,7 +148,7 @@ func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairA
 		certPEM: caPem,
 	}
 
-	if c.secretInfo.saveCaKey {
+	if !c.secretInfo.dontSaveCaKey {
 		keyPem, ok := secret.Data[c.secretInfo.getCAKeyName()]
 		if !ok {
 			return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caKeyName))

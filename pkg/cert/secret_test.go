@@ -43,8 +43,9 @@ func TestCertManager_ensureSecret(t *testing.T) {
 	secretClient := &FakeSecretInterface{}
 	c := certManager{
 		secretInfo: SecretInfo{
-			Name:      "test",
-			Namespace: "",
+			Name:          "test",
+			Namespace:     "",
+			dontSaveCaKey: true,
 		},
 		certOpt: CertOption{
 			CAName:               "ca",
@@ -74,7 +75,6 @@ func TestCertManager_ensureSecret_use_exist_secret(t *testing.T) {
 		secretInfo: SecretInfo{
 			Name:      "test",
 			Namespace: "",
-			saveCaKey: true,
 		},
 		certOpt: CertOption{
 			CAName:               "ca",
