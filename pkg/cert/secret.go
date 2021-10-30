@@ -16,7 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	v1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	klog "k8s.io/klog/v2"
 )
 
@@ -25,7 +24,7 @@ const (
 	keyName              = "tls.key"
 	caCertName           = "ca.crt"
 	caKeyName            = "ca.key"
-	certValidityDuration = time.Hour * 24 * 365 * 10
+	certValidityDuration = time.Hour * 24 * 365 * 10 // 10 years
 )
 
 type keyPairArtifacts struct {
@@ -44,13 +43,19 @@ type SecretInfo struct {
 	keyName    string
 }
 
-type CertManager struct {
-	secretInfo    SecretInfo
-	certOpt       CertOption
-	secretsGetter v1.SecretsGetter
+type certManager struct {
+	secretInfo   SecretInfo
+	certOpt      CertOption
+	secretClient secretInterface
 }
 
-func (c *CertManager) ensureSecret(ctx context.Context) (*corev1.Secret, error) {
+type secretInterface interface {
+	Create(ctx context.Context, secret *corev1.Secret, opts metav1.CreateOptions) (*corev1.Secret, error)
+	Update(ctx context.Context, secret *corev1.Secret, opts metav1.UpdateOptions) (*corev1.Secret, error)
+	Get(ctx context.Context, name string, opts metav1.GetOptions) (*corev1.Secret, error)
+}
+
+func (c *certManager) ensureSecret(ctx context.Context) (*corev1.Secret, error) {
 	secret, err := c.ensureSecretWithoutRetry(ctx)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) || apierrors.IsNotFound(err) || apierrors.IsConflict(err) {
@@ -60,8 +65,8 @@ func (c *CertManager) ensureSecret(ctx context.Context) (*corev1.Secret, error) 
 	return secret, err
 }
 
-func (c *CertManager) ensureSecretWithoutRetry(ctx context.Context) (*corev1.Secret, error) {
-	client := c.secretsGetter.Secrets(c.secretInfo.Namespace)
+func (c *certManager) ensureSecretWithoutRetry(ctx context.Context) (*corev1.Secret, error) {
+	client := c.secretClient
 	name := c.secretInfo.Name
 	secret, err := client.Get(ctx, name, metav1.GetOptions{})
 	if err != nil {
@@ -89,7 +94,7 @@ func (c *CertManager) ensureSecretWithoutRetry(ctx context.Context) (*corev1.Sec
 	return secret, nil
 }
 
-func (c *CertManager) newSecret() (*corev1.Secret, error) {
+func (c *certManager) newSecret() (*corev1.Secret, error) {
 	var caArtifacts *keyPairArtifacts
 	now := time.Now()
 	begin := now.Add(-1 * time.Hour)
@@ -113,7 +118,7 @@ func (c *CertManager) newSecret() (*corev1.Secret, error) {
 	return secret, nil
 }
 
-func (c *CertManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtifacts, secret *corev1.Secret) {
+func (c *certManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtifacts, secret *corev1.Secret) {
 	if secret.Data == nil {
 		secret.Data = make(map[string][]byte)
 	}
@@ -123,7 +128,7 @@ func (c *CertManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtif
 	secret.Data[c.secretInfo.getKeyName()] = key
 }
 
-func (c *CertManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairArtifacts, error) {
+func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairArtifacts, error) {
 	caPem, ok := secret.Data[c.secretInfo.getCACertName()]
 	if !ok {
 		return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
@@ -148,7 +153,7 @@ func (c *CertManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairA
 	}, nil
 }
 
-func (c *CertManager) createCACert(begin, end time.Time) (*keyPairArtifacts, error) {
+func (c *certManager) createCACert(begin, end time.Time) (*keyPairArtifacts, error) {
 	hosts := []string{}
 	hosts = append(hosts, c.certOpt.DNSNames...)
 	hosts = append(hosts, c.certOpt.Hosts...)
@@ -174,7 +179,7 @@ func (c *CertManager) createCACert(begin, end time.Time) (*keyPairArtifacts, err
 	return &keyPairArtifacts{cert: cert, key: key, certPEM: certPem, keyPEM: keyPem}, nil
 }
 
-func (c *CertManager) createCertPEM(ca *keyPairArtifacts, begin, end time.Time) ([]byte, []byte, error) {
+func (c *certManager) createCertPEM(ca *keyPairArtifacts, begin, end time.Time) ([]byte, []byte, error) {
 	hosts := []string{}
 	hosts = append(hosts, c.certOpt.DNSNames...)
 	hosts = append(hosts, c.certOpt.Hosts...)
@@ -230,7 +235,7 @@ func (s SecretInfo) getKeyName() string {
 	return keyName
 }
 
-func mergeCAPemCerts(pemCerts []byte, newPemCerts []byte) (bool, []byte) {
+func mergeCAPemCerts(pemCerts []byte, newPemCerts []byte) (changed bool, certs []byte) {
 	if bytes.Contains(pemCerts, bytes.TrimSpace(newPemCerts)) {
 		return false, pemCerts
 	}
@@ -246,7 +251,9 @@ func mergeCAPemCerts(pemCerts []byte, newPemCerts []byte) (bool, []byte) {
 
 	// new ca then old ca
 	newCerts.Certificate = append(newCerts.Certificate, caCerts.Certificate...)
-	newCerts.Certificate = append(newCerts.Certificate, oldCertBytes)
+	if len(oldCertBytes) > 0 {
+		newCerts.Certificate = append(newCerts.Certificate, oldCertBytes)
+	}
 
 	pemBytes, _ := encodePEMCerts(&newCerts)
 	return true, pemBytes
