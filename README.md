@@ -1,8 +1,15 @@
 # webhookcert
 
+[![CI](https://github.com/mozillazg/webhookcert/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/mozillazg/webhookcert/actions/workflows/ci.yml)
+[![Coverage Status](https://coveralls.io/repos/github/mozillazg/webhookcert/badge.svg?branch=master)](https://coveralls.io/github/mozillazg/webhookcert?branch=master)
+
 A simple cert solution for writing Kubernetes Webhook Server.
 
 ## Usage
+
+```
+go get github.com/mozillazg/webhookcert/pkg/cert
+```
 
 ```go
 import "github.com/mozillazg/webhookcert/pkg/cert"
@@ -18,7 +25,7 @@ import "github.com/mozillazg/webhookcert/pkg/cert"
 	webhookcert := cert.NewWebhookCert(cert.CertOption{
 		CAName:          caName,
 		CAOrganizations: []string{caOrganization},
-		DNSNames:        []string{dnsName},
+		Hosts:        []string{dnsName},
 		CommonName:      dnsName,
 		CertDir:         certDir,
 		SecretInfo: cert.SecretInfo{
@@ -27,7 +34,7 @@ import "github.com/mozillazg/webhookcert/pkg/cert"
 		},
 	}, webhooks, kubeclient, dyclient)
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute * 3)
 	defer cancel()
 	err := webhookcert.EnsureCertReady(ctx)
 	if err != nil {
@@ -35,9 +42,7 @@ import "github.com/mozillazg/webhookcert/pkg/cert"
 	}
 ```
 
-RealWorld example: [example](https://github.com/mozillazg/echo-k8s-webhook/blob/08aabec89bb8aac3edeeffe72ebd7b9bbaa5d40e/main.go#L85-L115)
-
-## Permission
+## Permissions
 
 ```yaml
 ---
@@ -61,7 +66,6 @@ rules:
       - <cert_secret_name>
     verbs:
       - get
-      - patch
       - update
 
 ---
@@ -78,6 +82,5 @@ rules:
       - <validating_name>
     verbs:
       - get
-      - patch
       - update
 ```
