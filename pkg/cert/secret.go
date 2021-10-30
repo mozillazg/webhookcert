@@ -127,11 +127,11 @@ func (c *certManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtif
 		secret.Data = make(map[string][]byte)
 	}
 	secret.Data[c.secretInfo.getCACertName()] = caArtifacts.certPEM
-	secret.Data[c.secretInfo.getCAKeyName()] = caArtifacts.keyPEM
-	secret.Data[c.secretInfo.getCertName()] = cert
 	if c.secretInfo.saveCaKey {
-		secret.Data[c.secretInfo.getKeyName()] = key
+		secret.Data[c.secretInfo.getCAKeyName()] = caArtifacts.keyPEM
 	}
+	secret.Data[c.secretInfo.getCertName()] = cert
+	secret.Data[c.secretInfo.getKeyName()] = key
 }
 
 func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairArtifacts, error) {

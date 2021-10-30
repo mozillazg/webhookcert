@@ -61,6 +61,11 @@ func TestCertManager_ensureSecret(t *testing.T) {
 	assert.Equal(t, s, secretClient.gotCreateSecret)
 	assert.Equal(t, s.Name, "test")
 	assert.GreaterOrEqual(t, len(s.Data), 3)
+
+	assert.Nil(t, s.Data["ca.key"])
+	assert.NotNil(t, s.Data["tls.key"])
+	assert.NotNil(t, s.Data["tls.crt"])
+	assert.NotNil(t, s.Data["ca.crt"])
 }
 
 func TestCertManager_ensureSecret_use_exist_secret(t *testing.T) {
