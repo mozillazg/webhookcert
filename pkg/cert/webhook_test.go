@@ -1,15 +1,19 @@
 package cert
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/admissionregistration/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 var (
@@ -117,6 +121,35 @@ func Test_injectCertToWebhook(t *testing.T) {
 			},
 		},
 		{
+			name: "wehooks merge certs ignore invalid cert",
+			args: args{
+				object: &v1.ValidatingWebhookConfiguration{
+					TypeMeta:   metav1.TypeMeta{},
+					ObjectMeta: metav1.ObjectMeta{},
+					Webhooks: []v1.ValidatingWebhook{
+						{
+							Name: "test1",
+							ClientConfig: v1.WebhookClientConfig{
+								CABundle: []byte("Cg=="),
+							},
+						},
+						{
+							Name: "test2",
+							ClientConfig: v1.WebhookClientConfig{
+								CABundle: []byte(caPemForTestB),
+							},
+						},
+					},
+				},
+				caPem: []byte(caPemForTestA),
+			},
+			wantChanged: true,
+			wantErr:     false,
+			wantCaPems: []string{caPemForTestA,
+				fmt.Sprintf("%s\n%s", strings.TrimSpace(caPemForTestA), strings.TrimSpace(caPemForTestB)),
+			},
+		},
+		{
 			name: "wehooks merge certs: dont merge same cert",
 			args: args{
 				object: &v1.ValidatingWebhookConfiguration{
@@ -174,4 +207,217 @@ func Test_injectCertToWebhook(t *testing.T) {
 			}
 		})
 	}
+}
+
+type mockResourceInterfaceData struct {
+	inputName string
+	inputData *unstructured.Unstructured
+	data      *unstructured.Unstructured
+	err       error
+	callCount int
+}
+
+type mockResourceInterface struct {
+	getData    *mockResourceInterfaceData
+	updateData *mockResourceInterfaceData
+}
+
+func (m *mockResourceInterface) Get(ctx context.Context, name string, options metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	m.getData.inputName = name
+	m.getData.callCount++
+	return m.getData.data.DeepCopy(), m.getData.err
+}
+
+func (m *mockResourceInterface) Update(ctx context.Context, obj *unstructured.Unstructured, options metav1.UpdateOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	m.updateData.inputData = obj
+	m.updateData.callCount++
+	return m.updateData.data.DeepCopy(), m.updateData.err
+}
+
+func Test_webhookManager_ensureCA_success(t *testing.T) {
+	object := &v1.ValidatingWebhookConfiguration{
+		TypeMeta:   metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{},
+		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name: "test1",
+			},
+			{
+				Name: "test2",
+			},
+		},
+	}
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	wh := &unstructured.Unstructured{Object: obj}
+	assert.NoError(t, err)
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			data: wh,
+			err:  nil,
+		},
+		updateData: &mockResourceInterfaceData{
+			data: wh,
+			err:  nil,
+		},
+	}
+	m := webhookManager{
+		webhooks: []WebhookInfo{
+			{
+				Type: ValidatingV1,
+				Name: "test",
+			},
+		},
+		resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+			return res
+		},
+	}
+	err = m.ensureCA(context.TODO(), []byte(caPemForTestA))
+	assert.NoError(t, err)
+
+	assert.Equal(t, "test", res.getData.inputName)
+	assert.Equal(t, 1, res.getData.callCount)
+	assert.Equal(t, 1, res.updateData.callCount)
+	assert.NotNil(t, res.updateData.inputData)
+}
+
+func Test_webhookManager_ensureCA_skip_get_not_found(t *testing.T) {
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			err: apierrors.NewNotFound(schema.GroupResource{}, "test"),
+		},
+		updateData: &mockResourceInterfaceData{},
+	}
+	m := webhookManager{
+		webhooks: []WebhookInfo{
+			{
+				Type: ValidatingV1,
+				Name: "test",
+			},
+		},
+		resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+			return res
+		},
+	}
+	err := m.ensureCA(context.TODO(), []byte(caPemForTestA))
+	assert.NoError(t, err)
+
+	assert.Equal(t, "test", res.getData.inputName)
+	assert.Equal(t, 1, res.getData.callCount)
+	assert.Equal(t, 0, res.updateData.callCount)
+	assert.Nil(t, res.updateData.inputData)
+}
+
+func Test_webhookManager_ensureCA_skip_update_not_found(t *testing.T) {
+	object := &v1.ValidatingWebhookConfiguration{
+		TypeMeta:   metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{},
+		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name: "test1",
+			},
+			{
+				Name: "test2",
+			},
+		},
+	}
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	wh := &unstructured.Unstructured{Object: obj}
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			data: wh,
+		},
+		updateData: &mockResourceInterfaceData{
+			err: apierrors.NewNotFound(schema.GroupResource{}, "test"),
+		},
+	}
+	m := webhookManager{
+		webhooks: []WebhookInfo{
+			{
+				Type: ValidatingV1,
+				Name: "test",
+			},
+		},
+		resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+			return res
+		},
+	}
+	err = m.ensureCA(context.TODO(), []byte(caPemForTestA))
+	assert.NoError(t, err)
+
+	assert.Equal(t, "test", res.getData.inputName)
+	assert.Equal(t, 1, res.getData.callCount)
+	assert.Equal(t, 1, res.updateData.callCount)
+	assert.NotNil(t, res.updateData.inputData)
+}
+
+func Test_webhookManager_ensureCA_retry_when_get_error(t *testing.T) {
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			err: apierrors.NewInternalError(errors.New("error from get")),
+		},
+		updateData: &mockResourceInterfaceData{},
+	}
+	m := webhookManager{
+		webhooks: []WebhookInfo{
+			{
+				Type: ValidatingV1,
+				Name: "test",
+			},
+		},
+		resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+			return res
+		},
+	}
+	err := m.ensureCA(context.TODO(), []byte(caPemForTestA))
+	assert.Error(t, err)
+	t.Log(err)
+
+	assert.Equal(t, "test", res.getData.inputName)
+	assert.Greater(t, res.getData.callCount, 2)
+	assert.Equal(t, 0, res.updateData.callCount)
+	assert.Nil(t, res.updateData.inputData)
+}
+
+func Test_webhookManager_ensureCA_retry_when_update_error(t *testing.T) {
+	object := &v1.ValidatingWebhookConfiguration{
+		TypeMeta:   metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{},
+		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name: "test1",
+			},
+			{
+				Name: "test2",
+			},
+		},
+	}
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	wh := &unstructured.Unstructured{Object: obj}
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			data: wh,
+		},
+		updateData: &mockResourceInterfaceData{
+			err: apierrors.NewInternalError(errors.New("error from update")),
+		},
+	}
+	m := webhookManager{
+		webhooks: []WebhookInfo{
+			{
+				Type: ValidatingV1,
+				Name: "test",
+			},
+		},
+		resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+			return res
+		},
+	}
+	err = m.ensureCA(context.TODO(), []byte(caPemForTestA))
+	assert.Error(t, err)
+	t.Log(err)
+
+	assert.Equal(t, "test", res.getData.inputName)
+	assert.Greater(t, res.getData.callCount, 2)
+	assert.Greater(t, res.updateData.callCount, 2)
+	assert.NotNil(t, res.updateData.inputData)
 }

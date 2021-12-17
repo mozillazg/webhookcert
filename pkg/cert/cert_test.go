@@ -27,8 +27,8 @@ func TestWebhookCert_ensureCert(t *testing.T) {
 			secretClient: secretClient,
 		},
 		webhookmanager: &webhookManager{
-			webhooks: nil,
-			dyclient: nil,
+			webhooks:             nil,
+			resourceClientGetter: nil,
 		},
 	}
 
