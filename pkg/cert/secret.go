@@ -24,7 +24,7 @@ const (
 	keyName              = "tls.key"
 	caCertName           = "ca.crt"
 	caKeyName            = "ca.key"
-	certValidityDuration = time.Hour * 24 * 365 * 10 // 10 years
+	certValidityDuration = time.Hour * 24 * 365 * 100 // 100 years
 )
 
 type keyPairArtifacts struct {
