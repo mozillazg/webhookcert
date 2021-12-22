@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 var (
@@ -232,6 +233,10 @@ func (m *mockResourceInterface) Update(ctx context.Context, obj *unstructured.Un
 	m.updateData.inputData = obj
 	m.updateData.callCount++
 	return m.updateData.data.DeepCopy(), m.updateData.err
+}
+
+func (m *mockResourceInterface) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
+	return nil, nil
 }
 
 func Test_webhookManager_ensureCA_success(t *testing.T) {
