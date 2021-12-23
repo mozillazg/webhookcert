@@ -19,15 +19,23 @@ import (
 )
 
 type CertOption struct {
+	// CAName will be used as CommonName of CA cert
 	CAName string
-	// TODO: use Organizations instead
-	CAOrganizations []string
-	Hosts           []string
-	// Deprecated: user Hosts instead
-	DNSNames             []string
-	CommonName           string
-	CertDir              string
+	// Organizations for certs
+	Organizations []string
+	// Hosts for server cert
+	Hosts []string
+	// CommonName for server cert
+	CommonName string
+	RSAKeySize int
+	// cert dir to mount secret
+	CertDir string
+	// cert will be expired after this duration
 	CertValidityDuration time.Duration
+	// Deprecated: use Organizations instead
+	CAOrganizations []string
+	// Deprecated: user Hosts instead
+	DNSNames []string
 
 	SecretInfo SecretInfo
 }
@@ -163,9 +171,23 @@ func (c CertOption) getCertValidityDuration() time.Duration {
 
 func (c CertOption) getHots() []string {
 	hosts := []string{}
-	hosts = append(hosts, c.DNSNames...)
 	hosts = append(hosts, c.Hosts...)
+	hosts = append(hosts, c.DNSNames...)
 	return hosts
+}
+
+func (c CertOption) getOrganizations() []string {
+	orgs := []string{}
+	orgs = append(orgs, c.Organizations...)
+	orgs = append(orgs, c.CAOrganizations...)
+	return orgs
+}
+
+func (c CertOption) getRSAKeySize() int {
+	if c.RSAKeySize >= 2048 {
+		return c.RSAKeySize
+	}
+	return rsaKeySize
 }
 
 func (c CertOption) getServerCertPath() string {

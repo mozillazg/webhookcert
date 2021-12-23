@@ -26,6 +26,7 @@ const (
 	caCertName           = "ca.crt"
 	caKeyName            = "ca.key"
 	certValidityDuration = time.Hour * 24 * 365 * 100 // 100 years
+	rsaKeySize           = 2048
 )
 
 type keyPairArtifacts struct {
@@ -169,17 +170,12 @@ func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairA
 }
 
 func (c *certManager) createCACert(begin, end time.Time) (*keyPairArtifacts, error) {
-	// TODO: use c.certOpt.getHots()
-	hosts := []string{}
-	hosts = append(hosts, c.certOpt.DNSNames...)
-	hosts = append(hosts, c.certOpt.Hosts...)
 	cert, key, err := certgen.GenCACert(certgen.CertOption{
 		CommonName:    c.certOpt.CAName,
-		Organizations: c.certOpt.CAOrganizations,
-		Hosts:         hosts,
+		Organizations: c.certOpt.getOrganizations(),
 		NotBefore:     begin,
 		NotAfter:      end,
-		RSAKeySize:    2048,
+		RSAKeySize:    c.certOpt.getRSAKeySize(),
 	})
 	if err != nil {
 		return nil, errors.Errorf("generating cert: %w", err)
@@ -196,18 +192,13 @@ func (c *certManager) createCACert(begin, end time.Time) (*keyPairArtifacts, err
 }
 
 func (c *certManager) createCertPEM(ca *keyPairArtifacts, begin, end time.Time) ([]byte, []byte, error) {
-	// TODO: use c.certOpt.getHots() instead
-	hosts := []string{}
-	hosts = append(hosts, c.certOpt.DNSNames...)
-	hosts = append(hosts, c.certOpt.Hosts...)
 	cert, key, err := certgen.GenServerCert(certgen.CertOption{
-		// TODO: use c.certOpt.CommonName
-		CommonName:    c.certOpt.CAName,
-		Organizations: c.certOpt.CAOrganizations,
-		Hosts:         hosts,
+		CommonName:    c.certOpt.CommonName,
+		Organizations: c.certOpt.getOrganizations(),
+		Hosts:         c.certOpt.getHots(),
 		NotBefore:     begin,
 		NotAfter:      end,
-		RSAKeySize:    2048,
+		RSAKeySize:    c.certOpt.getRSAKeySize(),
 		ParentCert:    ca.cert,
 		ParentKey:     ca.key,
 	})
