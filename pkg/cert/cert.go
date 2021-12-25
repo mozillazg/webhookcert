@@ -28,10 +28,11 @@ type CertOption struct {
 	Hosts []string
 	// CommonName for server cert
 	CommonName string
+	// RSA key size, default: 2048
 	RSAKeySize int
 	// cert dir to mount secret
 	CertDir string
-	// cert will be expired after this duration
+	// cert will be expired after this duration, default: 100 years
 	CertValidityDuration time.Duration
 	// Deprecated: use Organizations instead
 	CAOrganizations []string
