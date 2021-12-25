@@ -232,7 +232,7 @@ func Test_certManager_certSecretIsValid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := &certManager{}
-			err := c.certSecretIsValid(tt.args.secret, tt.args.now)
+			err := c.certSecretIsValid(tt.args.secret, tt.args.now, tt.args.now)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {

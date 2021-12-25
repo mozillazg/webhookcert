@@ -92,8 +92,8 @@ func (c *certManager) ensureSecretWithoutRetry(ctx context.Context) (*corev1.Sec
 		return client.Create(ctx, newSecret, metav1.CreateOptions{})
 	}
 
-	checkNow := time.Now().Add(-wait.Jitter(time.Hour*24*7, 0.5))
-	if err := c.certSecretIsValid(secret, checkNow); err != nil {
+	checkNotAfter := time.Now().Add(-wait.Jitter(time.Hour*24*7, 0.5))
+	if err := c.certSecretIsValid(secret, time.Now(), checkNotAfter); err != nil {
 		klog.Warningf("parse cert from secret %s failed, will update exist secret: %s", name, err)
 		newSecret, err := c.newSecret()
 		if err != nil {
@@ -171,7 +171,7 @@ func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairA
 	return kp, nil
 }
 
-func (c *certManager) certSecretIsValid(secret *corev1.Secret, now time.Time) error {
+func (c *certManager) certSecretIsValid(secret *corev1.Secret, now, notAfter time.Time) error {
 	ca, err := c.buildArtifactsFromSecret(secret)
 	if err != nil {
 		return err
@@ -193,10 +193,10 @@ func (c *certManager) certSecretIsValid(secret *corev1.Secret, now time.Time) er
 		return errors.Errorf("while parsing server key: %w", err)
 	}
 
-	if err := certIsValid(caCert, now); err != nil {
+	if err := certIsValid(caCert, now, notAfter); err != nil {
 		return err
 	}
-	if err := certIsValid(serverCert, now); err != nil {
+	if err := certIsValid(serverCert, now, notAfter); err != nil {
 		return err
 	}
 
@@ -321,10 +321,12 @@ func encodePEMCerts(certs *tls.Certificate) ([]byte, error) {
 	return data, nil
 }
 
-func certIsValid(c *x509.Certificate, currentTime time.Time) error {
-	now := currentTime
+func certIsValid(c *x509.Certificate, now, notAfter time.Time) error {
 	if now.IsZero() {
 		now = time.Now()
+	}
+	if notAfter.IsZero() {
+		notAfter = time.Now()
 	}
 	if now.Before(c.NotBefore) {
 		return x509.CertificateInvalidError{
@@ -332,11 +334,11 @@ func certIsValid(c *x509.Certificate, currentTime time.Time) error {
 			Reason: x509.Expired,
 			Detail: fmt.Sprintf("current time %s is before %s", now.Format(time.RFC3339), c.NotBefore.Format(time.RFC3339)),
 		}
-	} else if now.After(c.NotAfter) {
+	} else if notAfter.After(c.NotAfter) {
 		return x509.CertificateInvalidError{
 			Cert:   c,
 			Reason: x509.Expired,
-			Detail: fmt.Sprintf("current time %s is after %s", now.Format(time.RFC3339), c.NotAfter.Format(time.RFC3339)),
+			Detail: fmt.Sprintf("not after time %s is after %s", notAfter.Format(time.RFC3339), c.NotAfter.Format(time.RFC3339)),
 		}
 	}
 	return nil
