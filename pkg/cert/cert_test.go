@@ -15,6 +15,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	v1 "k8s.io/api/admissionregistration/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/watch"
 )
 
 func TestWebhookCert_ensureCert(t *testing.T) {
@@ -112,7 +118,7 @@ func TestCertOption_getHots(t *testing.T) {
 				Hosts:    []string{"a", "b"},
 				DNSNames: []string{"c", "d"},
 			},
-			want: []string{"c", "d", "a", "b"},
+			want: []string{"a", "b", "c", "d"},
 		},
 	}
 	for _, tt := range tests {
@@ -240,4 +246,70 @@ func TestWebhookCert_CheckServerCertValid_error_cert_value_not_match(t *testing.
 	err := c.CheckServerCertValid(context.TODO(), "127.0.0.1")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "certificate chain mismatch")
+}
+
+func TestWebhookCert_WatchAndEnsureWebhooksCA(t *testing.T) {
+	certOpt := CertOption{
+		CAName:          "",
+		CAOrganizations: nil,
+		Hosts:           nil,
+		CommonName:      "",
+		CertDir:         "",
+		SecretInfo:      SecretInfo{},
+	}
+	secretClient := &FakeSecretInterface{}
+	object := &v1.ValidatingWebhookConfiguration{
+		TypeMeta:   metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{},
+		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name: "test1",
+			},
+		},
+	}
+	obj, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	wh := &unstructured.Unstructured{Object: obj}
+
+	watcher := &mockWatchInterface{}
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			data: wh,
+		},
+		updateData: &mockResourceInterfaceData{
+			data: wh,
+		},
+		w: watcher,
+	}
+	m := &webhookManager{
+		webhooks: []WebhookInfo{
+			{
+				Type: ValidatingV1,
+				Name: "test",
+			},
+		},
+		resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+			return res
+		},
+	}
+	w := &WebhookCert{
+		certOpt: certOpt,
+		certmanager: &certManager{
+			secretInfo:   certOpt.SecretInfo,
+			certOpt:      certOpt,
+			secretClient: secretClient,
+		},
+		webhookmanager: m,
+	}
+	watchSendEvents := make(chan watch.Event, 10)
+	watcher.events = watchSendEvents
+	ctx, cancel := context.WithCancel(context.Background())
+	go w.WatchAndEnsureWebhooksCA(ctx)
+
+	watchSendEvents <- watch.Event{Type: watch.Added, Object: object}
+	watchSendEvents <- watch.Event{Type: watch.Modified, Object: object}
+	watchSendEvents <- watch.Event{Type: watch.Error}
+
+	time.Sleep(time.Second)
+	cancel()
+	time.Sleep(time.Second)
 }

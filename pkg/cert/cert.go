@@ -13,6 +13,7 @@ import (
 
 	errors "golang.org/x/xerrors"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
@@ -79,13 +80,46 @@ func (w *WebhookCert) EnsureCertReady(ctx context.Context) error {
 	return nil
 }
 
-// monitor webhook config ca config
-func (w *WebhookCert) MonitorCert(ctx context.Context) error {
+func (w *WebhookCert) WatchAndEnsureWebhooksCA(ctx context.Context) error {
+	events := make(chan watch.Event)
+	err := w.webhookmanager.watchChanges(ctx, events)
+	if err != nil {
+		return err
+	}
+
+	wait.JitterUntilWithContext(ctx, func(_ context.Context) {
+	loop:
+		for {
+			select {
+			case e := <-events:
+				if e.Type == watch.Error {
+					klog.Warningf("watch error will retry: %+v", e)
+					break loop
+				}
+				if e.Type == watch.Added || e.Type == watch.Modified {
+					if err := w.ensureCAWhenWebhookChange(ctx); err != nil {
+						klog.Errorf("ensure webhook ca failed: %+v", err)
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+
+		err := w.webhookmanager.watchChanges(ctx, events)
+		if err != nil {
+			klog.Errorf("watch webhook changes failed: %+v", err)
+		}
+	}, time.Minute, 5.0, true)
+
 	return nil
 }
 
-func (w *WebhookCert) ensureCertWhenUpdate() {
-
+func (w *WebhookCert) ensureCAWhenWebhookChange(ctx context.Context) error {
+	if err := w.ensureCert(ctx); err != nil {
+		return errors.Errorf(": %w", err)
+	}
+	return nil
 }
 
 func (w *WebhookCert) CheckServerCertValid(ctx context.Context, addr string) error {

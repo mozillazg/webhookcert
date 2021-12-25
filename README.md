@@ -83,4 +83,10 @@ rules:
     verbs:
       - get
       - update
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - validatingwebhookconfigurations
+    verbs:
+      - watch
 ```

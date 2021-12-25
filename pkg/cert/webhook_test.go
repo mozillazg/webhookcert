@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	v1 "k8s.io/api/admissionregistration/v1"
@@ -218,9 +219,25 @@ type mockResourceInterfaceData struct {
 	callCount int
 }
 
+type mockWatchInterface struct {
+	callStop int
+	events   chan watch.Event
+}
+
+func (m *mockWatchInterface) Stop() {
+	m.callStop++
+}
+
+func (m *mockWatchInterface) ResultChan() <-chan watch.Event {
+	return m.events
+}
+
 type mockResourceInterface struct {
 	getData    *mockResourceInterfaceData
 	updateData *mockResourceInterfaceData
+
+	w  *mockWatchInterface
+	we error
 }
 
 func (m *mockResourceInterface) Get(ctx context.Context, name string, options metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error) {
@@ -236,7 +253,7 @@ func (m *mockResourceInterface) Update(ctx context.Context, obj *unstructured.Un
 }
 
 func (m *mockResourceInterface) Watch(ctx context.Context, opts metav1.ListOptions) (watch.Interface, error) {
-	return nil, nil
+	return m.w, m.we
 }
 
 func Test_webhookManager_ensureCA_success(t *testing.T) {
@@ -425,4 +442,78 @@ func Test_webhookManager_ensureCA_retry_when_update_error(t *testing.T) {
 	assert.Greater(t, res.getData.callCount, 2)
 	assert.Greater(t, res.updateData.callCount, 2)
 	assert.NotNil(t, res.updateData.inputData)
+}
+
+func Test_webhookManager_watchChanges_receive_event(t *testing.T) {
+	object := &v1.ValidatingWebhookConfiguration{
+		TypeMeta:   metav1.TypeMeta{},
+		ObjectMeta: metav1.ObjectMeta{},
+		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name: "test1",
+			},
+		},
+	}
+	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	wh := &unstructured.Unstructured{Object: obj}
+
+	watcher := &mockWatchInterface{}
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			data: wh,
+		},
+		updateData: &mockResourceInterfaceData{
+			err: apierrors.NewInternalError(errors.New("error from update")),
+		},
+		w: watcher,
+	}
+	m := webhookManager{
+		webhooks: []WebhookInfo{
+			{
+				Type: ValidatingV1,
+				Name: "test",
+			},
+		},
+		resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+			return res
+		},
+	}
+
+	watchSendEvents := make(chan watch.Event, 10)
+	watcher.events = watchSendEvents
+	events := make(chan watch.Event)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err = m.watchChanges(ctx, events)
+	assert.NoError(t, err)
+
+	// receive event
+	e1 := watch.Event{Type: watch.Added}
+	watchSendEvents <- e1
+	select {
+	case receivedE1 := <-events:
+		assert.Equal(t, e1, receivedE1)
+	case <-time.After(time.Second):
+		assert.Fail(t, "no event")
+	}
+
+	// receive error
+	e2 := watch.Event{Type: watch.Error}
+	watchSendEvents <- e2
+	select {
+	case receivedE2 := <-events:
+		assert.Equal(t, e2, receivedE2)
+	case <-time.After(time.Second):
+		assert.Fail(t, "no event")
+	}
+
+	// after error canceled watch
+	assert.Equal(t, 1, watcher.callStop)
+	e3 := watch.Event{Type: watch.Modified}
+	watchSendEvents <- e3
+	select {
+	case <-events:
+		assert.Fail(t, "should no event")
+	case <-time.After(time.Second):
+	}
 }
