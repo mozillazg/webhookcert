@@ -3,6 +3,7 @@ package cert
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -125,4 +126,118 @@ func TestCertManager_ensureSecret_update_exist_secret(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, newS)
 	assert.NotEqual(t, s, newS)
+}
+
+func Test_certManager_certSecretIsValid(t *testing.T) {
+	secretClient := &FakeSecretInterface{}
+	c := certManager{
+		secretInfo: SecretInfo{
+			Name:      "test",
+			Namespace: "",
+		},
+		certOpt: CertOption{
+			CAName:               "ca",
+			CAOrganizations:      []string{"ca"},
+			Hosts:                []string{"example.com"},
+			CommonName:           "test",
+			CertDir:              "",
+			CertValidityDuration: 0,
+		},
+		secretClient: secretClient,
+	}
+	type args struct {
+		secret *corev1.Secret
+		now    time.Time
+	}
+	validSecret, _ := c.newSecret()
+
+	invalidSecretWithoutCa := validSecret.DeepCopy()
+	delete(invalidSecretWithoutCa.Data, c.secretInfo.getCACertName())
+	invalidSecretWithInvalidCa := validSecret.DeepCopy()
+	invalidSecretWithInvalidCa.Data[c.secretInfo.getCACertName()] = []byte("xxx")
+
+	invalidSecretWithoutCert := validSecret.DeepCopy()
+	delete(invalidSecretWithoutCert.Data, c.secretInfo.getCertName())
+	invalidSecretWithInvalidCert := validSecret.DeepCopy()
+	invalidSecretWithInvalidCert.Data[c.secretInfo.getCertName()] = []byte("xxx")
+
+	invalidSecretWithoutKey := validSecret.DeepCopy()
+	delete(invalidSecretWithoutKey.Data, c.secretInfo.getKeyName())
+	invalidSecretWithInvalidKey := validSecret.DeepCopy()
+	invalidSecretWithInvalidKey.Data[c.secretInfo.getKeyName()] = []byte("xxx")
+
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "valid",
+			args: args{
+				secret: validSecret,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid: expired",
+			args: args{
+				secret: validSecret,
+				now:    time.Now().Add(certValidityDuration),
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: no ca",
+			args: args{
+				secret: invalidSecretWithoutCa,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: invalid ca",
+			args: args{
+				secret: invalidSecretWithInvalidCa,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: no cert",
+			args: args{
+				secret: invalidSecretWithoutCert,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: invalid cert",
+			args: args{
+				secret: invalidSecretWithInvalidCert,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: no key",
+			args: args{
+				secret: invalidSecretWithoutKey,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: invalid key",
+			args: args{
+				secret: invalidSecretWithInvalidKey,
+			},
+			wantErr: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &certManager{}
+			err := c.certSecretIsValid(tt.args.secret, tt.args.now, tt.args.now)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
