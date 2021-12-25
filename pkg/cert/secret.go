@@ -16,6 +16,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 	klog "k8s.io/klog/v2"
 )
@@ -90,8 +91,9 @@ func (c *certManager) ensureSecretWithoutRetry(ctx context.Context) (*corev1.Sec
 		}
 		return client.Create(ctx, newSecret, metav1.CreateOptions{})
 	}
-	_, err = c.buildArtifactsFromSecret(secret)
-	if err != nil {
+
+	checkNow := time.Now().Add(-wait.Jitter(time.Hour*24*7, 0.5))
+	if err := c.certSecretIsValid(secret, checkNow); err != nil {
 		klog.Warningf("parse cert from secret %s failed, will update exist secret: %s", name, err)
 		newSecret, err := c.newSecret()
 		if err != nil {
@@ -167,6 +169,38 @@ func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairA
 		kp.key = key
 	}
 	return kp, nil
+}
+
+func (c *certManager) certSecretIsValid(secret *corev1.Secret, now time.Time) error {
+	ca, err := c.buildArtifactsFromSecret(secret)
+	if err != nil {
+		return err
+	}
+	caCert := ca.cert
+	serverPem, ok := secret.Data[c.secretInfo.getCertName()]
+	if !ok {
+		return errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
+	}
+	serverKey, ok := secret.Data[c.secretInfo.getKeyName()]
+	if !ok {
+		return errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
+	}
+	serverCert, _, err := decoder.DecodePemCert(serverPem)
+	if err != nil {
+		return errors.Errorf("while parsing server cert: %w", err)
+	}
+	if _, _, err := decoder.DecodePemPrivateKey(serverKey); err != nil {
+		return errors.Errorf("while parsing server key: %w", err)
+	}
+
+	if err := certIsValid(caCert, now); err != nil {
+		return err
+	}
+	if err := certIsValid(serverCert, now); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (c *certManager) createCACert(begin, end time.Time) (*keyPairArtifacts, error) {
@@ -285,4 +319,25 @@ func encodePEMCerts(certs *tls.Certificate) ([]byte, error) {
 		return nil, errors.Errorf("encoding cert: %w", err)
 	}
 	return data, nil
+}
+
+func certIsValid(c *x509.Certificate, currentTime time.Time) error {
+	now := currentTime
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if now.Before(c.NotBefore) {
+		return x509.CertificateInvalidError{
+			Cert:   c,
+			Reason: x509.Expired,
+			Detail: fmt.Sprintf("current time %s is before %s", now.Format(time.RFC3339), c.NotBefore.Format(time.RFC3339)),
+		}
+	} else if now.After(c.NotAfter) {
+		return x509.CertificateInvalidError{
+			Cert:   c,
+			Reason: x509.Expired,
+			Detail: fmt.Sprintf("current time %s is after %s", now.Format(time.RFC3339), c.NotAfter.Format(time.RFC3339)),
+		}
+	}
+	return nil
 }

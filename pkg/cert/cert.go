@@ -63,6 +63,7 @@ func NewWebhookCert(certOpt CertOption, webhooks []WebhookInfo, kubeclient kuber
 		},
 		webhookmanager: newWebhookManager(webhooks, dyclient),
 		checkerClient: &http.Client{Transport: &http.Transport{
+			// TODO: use ca from secret
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		}},
 	}
