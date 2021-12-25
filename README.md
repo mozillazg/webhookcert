@@ -11,36 +11,7 @@ A simple cert solution for writing Kubernetes Webhook Server.
 go get github.com/mozillazg/webhookcert/pkg/cert
 ```
 
-```go
-import "github.com/mozillazg/webhookcert/pkg/cert"
-
-	kubeclient := kubernetes.NewForConfigOrDie(config.GetConfigOrDie())
-	dyclient := dynamic.NewForConfigOrDie(config.GetConfigOrDie())
-	webhooks := []cert.WebhookInfo{
-		{
-			Type: cert.ValidatingV1,
-			Name: validatingName,
-		},
-	}
-	webhookcert := cert.NewWebhookCert(cert.CertOption{
-		CAName:          caName,
-		CAOrganizations: []string{caOrganization},
-		Hosts:        []string{dnsName},
-		CommonName:      dnsName,
-		CertDir:         certDir,
-		SecretInfo: cert.SecretInfo{
-			Name:      secretName,
-			Namespace: namespace,
-		},
-	}, webhooks, kubeclient, dyclient)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute * 3)
-	defer cancel()
-	err := webhookcert.EnsureCertReady(ctx)
-	if err != nil {
-		klog.Fatalf("ensure cert ready failed: %+v", err)
-	}
-```
+Real world example: [main.go](https://github.com/mozillazg/echo-k8s-webhook/blob/master/main.go)
 
 ## Permissions
 
