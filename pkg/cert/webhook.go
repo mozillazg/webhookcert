@@ -148,8 +148,13 @@ loop:
 		default:
 		}
 		select {
-		case e := <-intf.ResultChan():
+		case e, ok := <-intf.ResultChan():
+			if !ok {
+				klog.Warningf("watch is done")
+				break loop
+			}
 			if e.Type == watch.Error {
+				klog.Warningf("watch got error, err: %s", err.Object)
 				err = e
 				break loop
 			} else {
