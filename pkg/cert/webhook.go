@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"time"
 
 	errors "golang.org/x/xerrors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -102,7 +103,7 @@ func (w *webhookManager) ensureWebhookCA(ctx context.Context, info WebhookInfo, 
 	return nil
 }
 
-func (w *webhookManager) watchChanges(ctx context.Context, events chan<- watch.Event) error {
+func (w *webhookManager) watchChanges(ctx context.Context, events chan<- watch.Event, watchTimeout time.Duration) error {
 	var watchInterfaces []watch.Interface
 	for _, info := range w.webhooks {
 		gvs, err := info.Type.gvr()
@@ -111,7 +112,7 @@ func (w *webhookManager) watchChanges(ctx context.Context, events chan<- watch.E
 		}
 		nameSelector := fields.OneTermEqualSelector("metadata.name", info.Name).String()
 		client := w.resourceClientGetter(*gvs)
-		ts := int64(60 * 60 * 23) // 23 hours
+		ts := int64(watchTimeout / time.Second)
 		watchInter, err := client.Watch(ctx, metav1.ListOptions{
 			FieldSelector:  nameSelector,
 			Watch:          true,
@@ -151,6 +152,9 @@ loop:
 		case e, ok := <-intf.ResultChan():
 			if !ok {
 				klog.Warningf("watch is done")
+				err = watch.Event{
+					Type: watch.Error,
+				}
 				break loop
 			}
 			if e.Type == watch.Error {

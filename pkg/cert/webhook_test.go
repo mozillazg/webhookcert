@@ -484,7 +484,7 @@ func Test_webhookManager_watchChanges_receive_event(t *testing.T) {
 	events := make(chan watch.Event)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err = m.watchChanges(ctx, events)
+	err = m.watchChanges(ctx, events, time.Minute)
 	assert.NoError(t, err)
 
 	// receive event

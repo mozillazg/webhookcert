@@ -84,7 +84,11 @@ func (w *WebhookCert) EnsureCertReady(ctx context.Context) error {
 
 func (w *WebhookCert) WatchAndEnsureWebhooksCA(ctx context.Context) error {
 	events := make(chan watch.Event)
-	err := w.webhookmanager.watchChanges(ctx, events)
+	watchTimeout := time.Hour * 23
+	if os.Getenv("WEBHOOKCERT_DEBUG_WATCH") == "true" {
+		watchTimeout = time.Minute * 15
+	}
+	err := w.webhookmanager.watchChanges(ctx, events, watchTimeout)
 	if err != nil {
 		return err
 	}
@@ -108,7 +112,7 @@ func (w *WebhookCert) WatchAndEnsureWebhooksCA(ctx context.Context) error {
 			}
 		}
 
-		err := w.webhookmanager.watchChanges(ctx, events)
+		err := w.webhookmanager.watchChanges(ctx, events, wait.Jitter(watchTimeout, 0.1))
 		if err != nil {
 			klog.Errorf("watch webhook changes failed: %+v", err)
 		}
