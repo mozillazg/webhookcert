@@ -454,7 +454,7 @@ func Test_webhookManager_watchChanges_receive_event(t *testing.T) {
 			},
 		},
 	}
-	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	obj, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
 	wh := &unstructured.Unstructured{Object: obj}
 
 	watcher := &mockWatchInterface{}
@@ -484,8 +484,7 @@ func Test_webhookManager_watchChanges_receive_event(t *testing.T) {
 	events := make(chan watch.Event)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	err = m.watchChanges(ctx, events)
-	assert.NoError(t, err)
+	go m.watchChanges(ctx, events, m.webhooks[0], time.Minute)
 
 	// receive event
 	e1 := watch.Event{Type: watch.Added}
@@ -498,19 +497,14 @@ func Test_webhookManager_watchChanges_receive_event(t *testing.T) {
 	}
 
 	// receive error
-	e2 := watch.Event{Type: watch.Error}
-	watchSendEvents <- e2
+	close(watchSendEvents)
 	select {
-	case receivedE2 := <-events:
-		assert.Equal(t, e2, receivedE2)
+	case <-events:
 	case <-time.After(time.Second):
-		assert.Fail(t, "no event")
 	}
 
-	// after error canceled watch
+	// after close canceled watch
 	assert.Equal(t, 1, watcher.callStop)
-	e3 := watch.Event{Type: watch.Modified}
-	watchSendEvents <- e3
 	select {
 	case <-events:
 		assert.Fail(t, "should no event")
