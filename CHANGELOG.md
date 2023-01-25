@@ -1,5 +1,9 @@
 # ChangeLog
 
+## [0.5.1] (2023-01-25)
+
+* Fix auto add https:// prefix for CheckServerCertValid addr not working
+
 ## [0.5.0] (2023-01-25)
 
 * Add CheckServerStarted to check whether the webhook server is started
