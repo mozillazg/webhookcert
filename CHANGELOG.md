@@ -1,5 +1,10 @@
 # ChangeLog
 
+## [0.5.0] (2023-mm-dd)
+
+* Add CheckServerStarted to check whether the webhook server is started
+* Add CheckServerStartedWithTimeout and CheckServerCertValidWithTimeout
+
 ## [0.4.3] (2022-02-11)
 
 * Fix not retry after watch is timeout
