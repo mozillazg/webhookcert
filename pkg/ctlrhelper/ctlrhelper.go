@@ -35,6 +35,8 @@ type Option struct {
 	ServiceName string
 	// required
 	CertDir string
+	// required
+	WebhookServerPort int
 
 	DnsName       string
 	Organizations []string
@@ -54,6 +56,7 @@ type WebhookHelper struct {
 
 	ensureCertFinished chan struct{}
 	webhookReady       chan struct{}
+	errC               chan error
 }
 
 func NewNewWebhookHelper(opt Option) (*WebhookHelper, error) {
@@ -79,7 +82,8 @@ func NewNewWebhookHelperOrDie(opt Option) *WebhookHelper {
 
 func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 	w := &WebhookHelper{
-		opt: opt,
+		opt:  opt,
+		errC: make(chan error),
 	}
 	if w.opt.DnsName == "" {
 		dnsName := fmt.Sprintf("%s.%s.svc", opt.ServiceName, opt.Namespace)
@@ -95,11 +99,11 @@ func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 	return w
 }
 
-func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(*webhook.Server)) {
+func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(*webhook.Server)) <-chan error {
 	webhookcert := w.ensureCertReady(ctx)
 	w.setupHealthzAndReadyz(mgr, webhookcert)
 	go w.setupControllers(mgr, webhookcert, registry)
-	return
+	return w.errC
 }
 
 func (w *WebhookHelper) ensureCertReady(ctx context.Context) *cert.WebhookCert {
@@ -121,13 +125,15 @@ func (w *WebhookHelper) ensureCertReady(ctx context.Context) *cert.WebhookCert {
 
 		if err := webhookcert.EnsureCertReady(ctxWithTimeout); err != nil {
 			log.Error(err, "ensure cert ready")
-			os.Exit(1)
+			w.errC <- err
+			return
 		}
 		close(w.ensureCertFinished)
 
 		if err := webhookcert.WatchAndEnsureWebhooksCA(ctx); err != nil {
 			log.Error(err, "watch and ensure webhooks CA")
-			os.Exit(1)
+			w.errC <- err
+			return
 		}
 	}()
 
@@ -140,7 +146,7 @@ func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.
 	log.Info("registering webhooks to the webhook server")
 	s := mgr.GetWebhookServer()
 	registry(s)
-	addr := fmt.Sprintf("127.0.0.1:%d", s.Port)
+	addr := fmt.Sprintf("127.0.0.1:%d", w.opt.WebhookServerPort)
 
 	backoff := wait.Backoff{
 		Steps:    10,
@@ -160,8 +166,7 @@ func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.
 }
 
 func (w *WebhookHelper) setupHealthzAndReadyz(mgr manager.Manager, webhookcert *cert.WebhookCert) {
-	s := mgr.GetWebhookServer()
-	addr := fmt.Sprintf("127.0.0.1:%d", s.Port)
+	addr := fmt.Sprintf("127.0.0.1:%d", w.opt.WebhookServerPort)
 	_ = mgr.AddHealthzCheck("webhook", func(_ *http.Request) error {
 		select {
 		case <-w.webhookReady:
@@ -199,6 +204,9 @@ func (o *Option) ValidateAndFillDefaultValues() error {
 	}
 	if o.CertDir == "" {
 		return errors.New("the CertDir field can not be empty")
+	}
+	if o.WebhookServerPort <= 0 {
+		return errors.New("the WebhookServerPort field can not be empty")
 	}
 	if o.DnsName == "" {
 		dnsName := fmt.Sprintf("%s.%s.svc", o.ServiceName, o.Namespace)
