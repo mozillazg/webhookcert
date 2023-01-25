@@ -56,7 +56,6 @@ type WebhookHelper struct {
 
 	ensureCertFinished chan struct{}
 	webhookReady       chan struct{}
-	errC               chan error
 }
 
 func NewNewWebhookHelper(opt Option) (*WebhookHelper, error) {
@@ -82,8 +81,7 @@ func NewNewWebhookHelperOrDie(opt Option) *WebhookHelper {
 
 func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 	w := &WebhookHelper{
-		opt:  opt,
-		errC: make(chan error),
+		opt: opt,
 	}
 	if w.opt.DnsName == "" {
 		dnsName := fmt.Sprintf("%s.%s.svc", opt.ServiceName, opt.Namespace)
@@ -99,14 +97,14 @@ func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 	return w
 }
 
-func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(*webhook.Server)) <-chan error {
-	webhookcert := w.ensureCertReady(ctx)
+func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(*webhook.Server), errC chan<- error) {
+	webhookcert := w.ensureCertReady(ctx, errC)
 	w.setupHealthzAndReadyz(mgr, webhookcert)
 	go w.setupControllers(mgr, webhookcert, registry)
-	return w.errC
+	return
 }
 
-func (w *WebhookHelper) ensureCertReady(ctx context.Context) *cert.WebhookCert {
+func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error) *cert.WebhookCert {
 	webhookcert := cert.NewWebhookCert(cert.CertOption{
 		CAName:        w.opt.ServiceName,
 		Organizations: w.opt.Organizations,
@@ -125,14 +123,14 @@ func (w *WebhookHelper) ensureCertReady(ctx context.Context) *cert.WebhookCert {
 
 		if err := webhookcert.EnsureCertReady(ctxWithTimeout); err != nil {
 			log.Error(err, "ensure cert ready")
-			w.errC <- err
+			errC <- err
 			return
 		}
 		close(w.ensureCertFinished)
 
 		if err := webhookcert.WatchAndEnsureWebhooksCA(ctx); err != nil {
 			log.Error(err, "watch and ensure webhooks CA")
-			w.errC <- err
+			errC <- err
 			return
 		}
 	}()
