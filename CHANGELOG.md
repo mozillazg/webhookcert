@@ -1,6 +1,6 @@
 # ChangeLog
 
-## [0.5.0] (2023-mm-dd)
+## [0.5.0] (2023-01-25)
 
 * Add CheckServerStarted to check whether the webhook server is started
 * Add CheckServerStartedWithTimeout and CheckServerCertValidWithTimeout
