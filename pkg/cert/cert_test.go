@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path"
 	"reflect"
@@ -184,6 +185,40 @@ func (m *mockCheckerClientInterface) Do(req *http.Request) (*http.Response, erro
 	return m.resp, nil
 }
 
+func TestWebhookCert_CheckServerStarted_success(t *testing.T) {
+	c, _ := getCertForTesting(t)
+	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer s.Close()
+
+	addr := s.URL[len("http://")+1:]
+	err := c.CheckServerStarted(context.TODO(), addr)
+	assert.NoError(t, err)
+
+	err = c.CheckServerStartedWithTimeout(addr, time.Second)
+	assert.NoError(t, err)
+}
+
+func TestWebhookCert_CheckServerStarted_failed(t *testing.T) {
+	c, _ := getCertForTesting(t)
+	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	s.Close()
+
+	addr := s.URL[len("http://")+1:]
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	err := c.CheckServerStarted(ctx, addr)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "webhook server is not reachable")
+	cancel()
+
+	err = c.CheckServerStartedWithTimeout(addr, time.Second)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "webhook server is not reachable")
+}
+
 func TestWebhookCert_CheckServerCertValid_success(t *testing.T) {
 	c, tlsCert := getCertForTesting(t)
 	var ps []*x509.Certificate
@@ -201,6 +236,9 @@ func TestWebhookCert_CheckServerCertValid_success(t *testing.T) {
 
 	err := c.CheckServerCertValid(context.TODO(), "127.0.0.1")
 	assert.NoError(t, err)
+
+	err = c.CheckServerCertValidWithTimeout("127.0.0.1", time.Second)
+	assert.NoError(t, err)
 }
 
 func TestWebhookCert_CheckServerCertValid_error_resp_err(t *testing.T) {
@@ -209,6 +247,11 @@ func TestWebhookCert_CheckServerCertValid_error_resp_err(t *testing.T) {
 	c.checkerClient = m
 
 	err := c.CheckServerCertValid(context.TODO(), "127.0.0.1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "connect webhook server")
+	assert.Contains(t, err.Error(), "resp error")
+
+	err = c.CheckServerCertValidWithTimeout("127.0.0.1", time.Second)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "connect webhook server")
 	assert.Contains(t, err.Error(), "resp error")
@@ -223,6 +266,10 @@ func TestWebhookCert_CheckServerCertValid_error_resp_no_tls(t *testing.T) {
 	c.checkerClient = m
 
 	err := c.CheckServerCertValid(context.TODO(), "127.0.0.1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "webhook server does not serve TLS certificate")
+
+	err = c.CheckServerCertValidWithTimeout("127.0.0.1", time.Second)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "webhook server does not serve TLS certificate")
 }
@@ -244,6 +291,10 @@ func TestWebhookCert_CheckServerCertValid_error_cert_value_not_match(t *testing.
 	c.checkerClient = m
 
 	err := c.CheckServerCertValid(context.TODO(), "127.0.0.1")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "certificate chain mismatch")
+
+	err = c.CheckServerCertValidWithTimeout("127.0.0.1", time.Second)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "certificate chain mismatch")
 }
