@@ -49,8 +49,10 @@ rules:
       - admissionregistration.k8s.io
     resources:
       - validatingwebhookconfigurations
+      - mutatingwebhookconfigurations
     resourceNames:
       - <validating_name>
+      - <mutating_name>
     verbs:
       - get
       - update
@@ -58,6 +60,7 @@ rules:
       - admissionregistration.k8s.io
     resources:
       - validatingwebhookconfigurations
+      - mutatingwebhookconfigurations
     verbs:
       - watch
 ```
