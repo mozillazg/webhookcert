@@ -17,8 +17,79 @@ A simple cert solution for writing Kubernetes Webhook Server.
 
 ## Usage
 
-```
-go get github.com/mozillazg/webhookcert/pkg/cert
+```go
+package main
+
+import (
+	"github.com/mozillazg/webhookcert/pkg/cert"
+	"github.com/mozillazg/webhookcert/pkg/ctlrhelper"
+	// ...
+)
+
+var (
+	namespace = "test"
+	secretName = "webhook-test-server-cert"
+	serviceName = "webhook-test-server"
+	port = 9443
+	certDir = "/certs"
+	webhookConfigName = "webhook-test-server-config"
+)
+
+func main() {
+	mgr, err := manager.New(config.GetConfigOrDie(), manager.Options{
+		Port:                   port,
+		CertDir:                certDir,
+		// ...
+	})
+
+	ctx := signals.SetupSignalHandler()
+	errC := make(chan error, 2)
+
+	setupWebhook(ctx, mgr, errC)
+
+	go func() {
+		if err := mgr.Start(ctx); err != nil {
+			errC <- err
+		}
+	}()
+
+	select {
+	case <-errC:
+		os.Exit(1)
+	case <-ctx.Done():
+	}
+}
+
+func setupWebhook(ctx context.Context, mgr manager.Manager, errC chan<- error) {
+	opt := ctlrhelper.Option{
+		Namespace:   namespace,
+		SecretName:  secretName,
+		ServiceName: serviceName,
+		CertDir:     certDir,
+		Webhooks: []cert.WebhookInfo{
+			{
+				Type: cert.ValidatingV1,
+				Name: webhookConfigName,
+			},
+		},
+		WebhookServerPort: port,
+	}
+
+	h, err := ctlrhelper.NewNewWebhookHelper(opt)
+	if err != nil {
+		errC <- err
+		return
+	}
+
+	handler1 := // ...
+	handler2 := // ...
+
+	h.Setup(ctx, mgr, func(s *webhook.Server) {
+		s.Register("/webhook/path/1", &webhook.Admission{Handler: handler1})
+		s.Register("/webhook/path/1", &webhook.Admission{Handler: handler2})
+	}, errC)
+}
+
 ```
 
 Real world example: [main.go](https://github.com/mozillazg/echo-k8s-webhook/blob/master/main.go)
@@ -73,4 +144,28 @@ rules:
       - mutatingwebhookconfigurations
     verbs:
       - watch
+```
+
+## Healthz and Readyz
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 9090
+  initialDelaySeconds: 5
+  timeoutSeconds: 4
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 9090
+  initialDelaySeconds: 5
+  timeoutSeconds: 4
+startupProbe:
+  httpGet:
+    path: /readyz
+    port: 9090
+  failureThreshold: 24
+  periodSeconds: 10
+  timeoutSeconds: 4
 ```
