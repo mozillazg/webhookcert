@@ -10,7 +10,7 @@ A simple cert solution for writing Kubernetes Webhook Server.
 * Auto-create certificate for webhook server.
 * Reuse certificate from secret.
 * Auto patch `caBundle` for the `validatingwebhookconfigurations` and `mutatingwebhookconfigurations` resources.
-* Auto restore `caBundle` when the value was invalid (for example, it was overwritten via `kubectl apply`).
+* Auto restore `caBundle` when the value is updated with invalid value (for example, it was overwritten via `kubectl replace`).
 * A checker to check whether the webhook server is started.
 * A checker to check whether the webhook server used certificate is expired or not synced.
 
