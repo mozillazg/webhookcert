@@ -75,7 +75,7 @@ func setupWebhook(ctx context.Context, mgr manager.Manager, errC chan<- error) {
 		WebhookServerPort: port,
 	}
 
-	h, err := ctlrhelper.NewNewWebhookHelper(opt)
+	h, err := ctlrhelper.NewWebhookHelper(opt)
 	if err != nil {
 		errC <- err
 		return
