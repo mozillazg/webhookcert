@@ -94,17 +94,17 @@ func NewNewWebhookHelperOrDie(opt Option) *WebhookHelper {
 // * setup healthz and readyz
 // * registry webhooks
 func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(*webhook.Server), errC chan<- error) {
-	webhookcert := w.ensureCertReady(ctx, errC)
+	webhookcert := w.ensureCertReady(ctx, errC, true, true)
 	w.setupHealthzAndReadyz(mgr, webhookcert)
 	go w.setupControllers(mgr, webhookcert, registry)
 	return
 }
 
-// EnsureCertReady ensure cert exist and mounted
+// EnsureCertReady ensure cert exist and mounted and webhook patched
 // it will block util successes or failed
 func (w *WebhookHelper) EnsureCertReady(ctx context.Context) error {
 	errC := make(chan error, 1)
-	w.ensureCertReady(ctx, errC)
+	w.ensureCertReady(ctx, errC, true, false)
 	select {
 	case <-w.ensureCertFinished:
 		return nil
@@ -115,7 +115,23 @@ func (w *WebhookHelper) EnsureCertReady(ctx context.Context) error {
 	}
 }
 
-func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error) *cert.WebhookCert {
+// EnsureCert ensure cert exist and webhook patched
+// it will block util successes or failed
+func (w *WebhookHelper) EnsureCert(ctx context.Context) error {
+	errC := make(chan error, 1)
+	w.ensureCertReady(ctx, errC, false, false)
+	select {
+	case <-w.ensureCertFinished:
+		return nil
+	case err := <-errC:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error,
+	ensureMount bool, watchAndEnsureWebhook bool) *cert.WebhookCert {
 	webhookcert := cert.NewWebhookCert(cert.CertOption{
 		CAName:        w.opt.ServiceName,
 		Organizations: w.opt.Organizations,
@@ -132,13 +148,27 @@ func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error) 
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, w.opt.TimeoutForEnsureCertReady)
 		defer cancel()
 
-		if err := webhookcert.EnsureCertReady(ctxWithTimeout); err != nil {
-			log.Error(err, "ensure cert ready")
-			errC <- err
-			return
+		if ensureMount {
+			log.V(2).Info("call EnsureCertReady")
+			if err := webhookcert.EnsureCertReady(ctxWithTimeout); err != nil {
+				log.Error(err, "ensure cert ready")
+				errC <- err
+				return
+			}
+		} else {
+			log.V(2).Info("call EnsureCert")
+			if err := webhookcert.EnsureCert(ctxWithTimeout); err != nil {
+				log.Error(err, "ensure cert")
+				errC <- err
+				return
+			}
 		}
 		close(w.ensureCertFinished)
 
+		if !watchAndEnsureWebhook {
+			log.V(2).Info("skip watch and ensure webhook CA")
+			return
+		}
 		if err := webhookcert.WatchAndEnsureWebhooksCA(ctx); err != nil {
 			log.Error(err, "watch and ensure webhooks CA")
 			errC <- err
