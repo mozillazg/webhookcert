@@ -71,6 +71,16 @@ func NewWebhookCert(certOpt CertOption, webhooks []WebhookInfo, kubeclient kuber
 	}
 }
 
+// EnsureCert ensure cert was created and webhook was patched
+func (w *WebhookCert) EnsureCert(ctx context.Context) error {
+	if err := w.ensureCert(ctx); err != nil {
+		return errors.Errorf(": %w", err)
+	}
+	klog.Info("ensure cert success")
+	return nil
+}
+
+// EnsureCertReady ensure cert was created and mounted and webhook was patched
 func (w *WebhookCert) EnsureCertReady(ctx context.Context) error {
 	if err := w.ensureCert(ctx); err != nil {
 		return errors.Errorf(": %w", err)

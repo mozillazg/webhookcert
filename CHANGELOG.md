@@ -1,13 +1,17 @@
 # ChangeLog
 
+## [0.6.0] (2023-04-05)
+
+* Add `EnsureCert` to ensure cert created and patched but skip ensure mounted
+
 ## [0.5.1] (2023-01-25)
 
-* Fix auto add https:// prefix for CheckServerCertValid addr not working
+* Fix auto add https:// prefix for `CheckServerCertValid` addr not working
 
 ## [0.5.0] (2023-01-25)
 
-* Add CheckServerStarted to check whether the webhook server is started
-* Add CheckServerStartedWithTimeout and CheckServerCertValidWithTimeout
+* Add `CheckServerStarted` to check whether the webhook server is started
+* Add `CheckServerStartedWithTimeout` and `CheckServerCertValidWithTimeout`
 
 ## [0.4.3] (2022-02-11)
 
@@ -23,9 +27,9 @@
 
 ## [0.4.0] (2021-12-25)
 
-* Add CheckServerCertValid to check whether server is using latest certs
-* Add Organizations and RSAKeySize
-* Add WatchAndEnsureWebhooksCA to watch and patch ca for webhook
+* Add `CheckServerCertValid` to check whether server is using latest certs
+* Add `Organizations` and `RSAKeySize`
+* Add `WatchAndEnsureWebhooksCA` to watch and patch ca for webhook
 
 ## [0.3.0] (2021-12-17)
 

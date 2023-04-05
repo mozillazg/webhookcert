@@ -24,7 +24,40 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 )
 
-func TestWebhookCert_ensureCert(t *testing.T) {
+func TestWebhookCert_EnsureCert(t *testing.T) {
+	certOpt := CertOption{
+		CAName:          "",
+		CAOrganizations: nil,
+		Hosts:           nil,
+		CommonName:      "",
+		CertDir:         "",
+		SecretInfo:      SecretInfo{},
+	}
+	secretClient := &FakeSecretInterface{}
+	w := &WebhookCert{
+		certOpt: certOpt,
+		certmanager: &certManager{
+			secretInfo:   certOpt.SecretInfo,
+			certOpt:      certOpt,
+			secretClient: secretClient,
+		},
+		webhookmanager: &webhookManager{
+			webhooks:             nil,
+			resourceClientGetter: nil,
+		},
+	}
+
+	err := w.ensureCert(context.TODO())
+	assert.NoError(t, err)
+	assert.NotNil(t, secretClient.gotCreateSecret)
+
+	ctx, cancelFunc := context.WithTimeout(context.TODO(), time.Second)
+	defer cancelFunc()
+	err = w.EnsureCert(ctx)
+	assert.NoError(t, err)
+}
+
+func TestWebhookCert_EnsureCertReady(t *testing.T) {
 	certOpt := CertOption{
 		CAName:          "",
 		CAOrganizations: nil,
