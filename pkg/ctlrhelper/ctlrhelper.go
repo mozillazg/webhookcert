@@ -247,16 +247,14 @@ func (o *Option) ValidateAndFillDefaultValues() error {
 	if o.WebhookServerPort <= 0 {
 		return errors.New("the WebhookServerPort field can not be empty")
 	}
+
+	serviceDns := fmt.Sprintf("%s.%s.svc", o.ServiceName, o.Namespace)
 	if o.DnsName == "" {
-		dnsName := fmt.Sprintf("%s.%s.svc", o.ServiceName, o.Namespace)
-		o.DnsName = dnsName
+		o.DnsName = serviceDns
 	}
-	if len(o.Organizations) == 0 {
-		o.Organizations = append(o.Organizations, o.ServiceName)
-	}
-	if len(o.Hosts) == 0 {
-		o.Hosts = append(o.Hosts, o.DnsName)
-	}
+	o.Organizations = append(o.Organizations, o.ServiceName)
+	o.Hosts = append(o.Hosts, o.DnsName, o.ServiceName, serviceDns)
+
 	if o.TimeoutForEnsureCertReady == 0 {
 		o.TimeoutForEnsureCertReady = defaultTimeoutForEnsureCertReady
 	}
