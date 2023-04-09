@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path"
@@ -56,6 +57,11 @@ type checkerClientInterface interface {
 }
 
 func NewWebhookCert(certOpt CertOption, webhooks []WebhookInfo, kubeclient kubernetes.Interface, dyclient dynamic.Interface) *WebhookCert {
+	ts := http.DefaultTransport.(*http.Transport).Clone()
+	// TODO: use ca from secret
+	ts.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	ts.DisableKeepAlives = true
+
 	return &WebhookCert{
 		certOpt: certOpt,
 		certmanager: &certManager{
@@ -64,10 +70,7 @@ func NewWebhookCert(certOpt CertOption, webhooks []WebhookInfo, kubeclient kuber
 			secretClient: kubeclient.CoreV1().Secrets(certOpt.SecretInfo.Namespace),
 		},
 		webhookmanager: newWebhookManager(webhooks, dyclient),
-		checkerClient: &http.Client{Transport: &http.Transport{
-			// TODO: use ca from secret
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}},
+		checkerClient:  &http.Client{Transport: ts},
 	}
 }
 
@@ -146,20 +149,7 @@ func (w *WebhookCert) CheckServerStartedWithTimeout(addr string, timeout time.Du
 }
 
 func (w *WebhookCert) CheckServerStarted(ctx context.Context, addr string) error {
-	config := &tls.Config{
-		InsecureSkipVerify: true,
-	}
-	d := &tls.Dialer{Config: config}
-	conn, err := d.DialContext(ctx, "tcp", addr)
-	if err != nil {
-		return errors.Errorf("webhook server is not reachable: %w", err)
-	}
-
-	if err := conn.Close(); err != nil {
-		return errors.Errorf("webhook server is not reachable: closing connection: %w", err)
-	}
-
-	return nil
+	return w.CheckServerCertValid(ctx, addr)
 }
 
 func (w *WebhookCert) CheckServerCertValidWithTimeout(addr string, timeout time.Duration) error {
@@ -183,6 +173,7 @@ func (w *WebhookCert) CheckServerCertValid(ctx context.Context, addr string) err
 		return errors.Errorf("connect webhook server: %w", err)
 	}
 	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if resp.TLS == nil || len(resp.TLS.PeerCertificates) == 0 {
 		return errors.New("webhook server does not serve TLS certificate")
