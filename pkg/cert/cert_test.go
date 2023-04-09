@@ -126,8 +126,9 @@ func TestCertOption_getCertValidityDuration(t *testing.T) {
 
 func TestCertOption_getHots(t *testing.T) {
 	type fields struct {
-		Hosts    []string
-		DNSNames []string
+		Hosts      []string
+		DNSNames   []string
+		CommonName string
 	}
 	tests := []struct {
 		name   string
@@ -137,7 +138,7 @@ func TestCertOption_getHots(t *testing.T) {
 		{
 			name:   "no",
 			fields: fields{},
-			want:   []string{},
+			want:   nil,
 		},
 		{
 			name: "only hosts",
@@ -154,15 +155,83 @@ func TestCertOption_getHots(t *testing.T) {
 			},
 			want: []string{"a", "b", "c", "d"},
 		},
+		{
+			name: "merge CommonName",
+			fields: fields{
+				Hosts:      []string{"a", "b"},
+				DNSNames:   []string{"c", "d"},
+				CommonName: "foobar",
+			},
+			want: []string{"a", "b", "c", "d", "foobar"},
+		},
+		{
+			name: "remove dup",
+			fields: fields{
+				Hosts: []string{"a", "b", "a", "b"},
+			},
+			want: []string{"a", "b"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			c := CertOption{
-				Hosts:    tt.fields.Hosts,
-				DNSNames: tt.fields.DNSNames,
+				Hosts:      tt.fields.Hosts,
+				DNSNames:   tt.fields.DNSNames,
+				CommonName: tt.fields.CommonName,
 			}
 			if got := c.getHots(); !reflect.DeepEqual(got, tt.want) {
 				t.Errorf("getHots() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCertOption_getOrganizations(t *testing.T) {
+	type fields struct {
+		Organizations   []string
+		CAOrganizations []string
+	}
+	tests := []struct {
+		name   string
+		fields fields
+		want   []string
+	}{
+		{
+			name:   "no",
+			fields: fields{},
+			want:   nil,
+		},
+		{
+			name: "only hosts",
+			fields: fields{
+				Organizations: []string{"a", "b"},
+			},
+			want: []string{"a", "b"},
+		},
+		{
+			name: "merge CAOrganizations",
+			fields: fields{
+				Organizations:   []string{"a", "b"},
+				CAOrganizations: []string{"c", "d"},
+			},
+			want: []string{"a", "b", "c", "d"},
+		},
+		{
+			name: "remove dup",
+			fields: fields{
+				Organizations: []string{"a", "b", "a", "b"},
+			},
+			want: []string{"a", "b"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := CertOption{
+				Organizations:   tt.fields.Organizations,
+				CAOrganizations: tt.fields.CAOrganizations,
+			}
+			if got := c.getOrganizations(); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("getOrganizations() = %v, want %v", got, tt.want)
 			}
 		})
 	}

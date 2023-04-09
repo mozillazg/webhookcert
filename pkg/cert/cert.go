@@ -253,14 +253,17 @@ func (c CertOption) getHots() []string {
 	hosts := []string{}
 	hosts = append(hosts, c.Hosts...)
 	hosts = append(hosts, c.DNSNames...)
-	return hosts
+	if c.CommonName != "" {
+		hosts = append(hosts, c.CommonName)
+	}
+	return removeDup(hosts)
 }
 
 func (c CertOption) getOrganizations() []string {
 	orgs := []string{}
 	orgs = append(orgs, c.Organizations...)
 	orgs = append(orgs, c.CAOrganizations...)
-	return orgs
+	return removeDup(orgs)
 }
 
 func (c CertOption) getRSAKeySize() int {
