@@ -1,0 +1,357 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-webhook
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cert-job-sa
+  namespace: demo-webhook
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cert-job-role
+  namespace: demo-webhook
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    verbs:
+      - create
+  - apiGroups:
+      - ""
+    resources:
+      - secrets
+    resourceNames:
+      - demo-webhook-server-cert
+    verbs:
+      - get
+      - update
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cert-job-rolebinding
+  namespace: demo-webhook
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cert-job-role
+subjects:
+  - kind: ServiceAccount
+    name: cert-job-sa
+    namespace: demo-webhook
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cert-job-clusterrole
+rules:
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - validatingwebhookconfigurations
+    resourceNames:
+      - demo-validating-webhook-1
+      - demo-validating-webhook-2
+    verbs:
+      - get
+      - update
+  - apiGroups:
+      - admissionregistration.k8s.io
+    resources:
+      - mutatingwebhookconfigurations
+    resourceNames:
+      - demo-mutating-webhook-1
+      - demo-mutating-webhook-2
+    verbs:
+      - get
+      - update
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cert-job-clusterrolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cert-job-clusterrole
+subjects:
+  - kind: ServiceAccount
+    name: cert-job-sa
+    namespace: demo-webhook
+
+#---
+#apiVersion: v1
+#kind: Secret
+#metadata:
+#  name: demo-webhook-server-cert
+#  namespace: demo-webhook
+
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ensure-cert-job
+  namespace: demo-webhook
+spec:
+  template:
+    metadata:
+      annotations:
+        container.seccomp.security.alpha.kubernetes.io/webhook: runtime/default
+    spec:
+      serviceAccountName: cert-job-sa
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      restartPolicy: OnFailure
+      containers:
+        - command:
+            - /ensure-webhook-cert
+          args:
+            - --namespace=$(POD_NAMESPACE)
+            - --secret-name=demo-webhook-server-cert
+            - --service-name=demo-webhook-service
+            - --validating-webhook-names=demo-validating-webhook-1,demo-validating-webhook-2
+            - --mutating-webhook-names=demo-mutating-webhook-1,demo-mutating-webhook-2
+            - --skip-wait-cert-mounted=true
+          image: mozillazg/webhookcert:0.1.0-rc.1
+          name: ensure-cert
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+          resources:
+            limits:
+              cpu: 100m
+              memory: 20Mi
+            requests:
+              cpu: 100m
+              memory: 20Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: demo-webhook
+  name: demo-webhook
+  namespace: demo-webhook
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: demo-webhook
+  template:
+    metadata:
+      labels:
+        app: demo-webhook
+      annotations:
+        container.seccomp.security.alpha.kubernetes.io/webhook: runtime/default
+    spec:
+      serviceAccountName: default
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - args:
+            - --port=9443
+            - --cert-dir=/certs
+            - --logtostderr
+          image: mozillazg/webhookcert:0.1.0-demo-webhook
+          name: webhook
+          env:
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: metadata.namespace
+          resources:
+            limits:
+              cpu: 100m
+              memory: 50Mi
+            requests:
+              cpu: 100m
+              memory: 20Mi
+          ports:
+            - name: webhook
+              containerPort: 9443
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            privileged: false
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - mountPath: /certs
+              name: cert
+              readOnly: true
+      nodeSelector:
+        kubernetes.io/os: linux
+      volumes:
+        - name: cert
+          secret:
+            secretName: demo-webhook-server-cert
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: demo-webhook-service
+  namespace: demo-webhook
+spec:
+  ports:
+    - name: https-webhook
+      port: 443
+      protocol: TCP
+      targetPort: 9443
+  selector:
+    app: demo-webhook
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: demo-validating-webhook-1
+webhooks:
+  - name: demo.k8s.webhook
+    matchPolicy: Equivalent
+    rules:
+      - operations:
+          - 'DELETE'
+        apiGroups:
+          - ''
+        apiVersions:
+          - 'v1'
+        resources:
+          - 'namespaces'
+        scope: "*"
+    failurePolicy: Fail
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        namespace: demo-webhook
+        name: demo-webhook-service
+        path: /validating-webhook
+    timeoutSeconds: 3
+
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: demo-validating-webhook-2
+webhooks:
+  - name: demo.k8s.webhook
+    matchPolicy: Equivalent
+    rules:
+      - operations:
+          - 'DELETE'
+        apiGroups:
+          - ''
+        apiVersions:
+          - 'v1'
+        resources:
+          - 'serviceaccounts'
+        scope: "*"
+    failurePolicy: Fail
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        namespace: demo-webhook
+        name: demo-webhook-service
+        path: /validating-webhook
+    timeoutSeconds: 3
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: demo-mutating-webhook-1
+webhooks:
+  - name: demo.k8s.webhook
+    matchPolicy: Equivalent
+    rules:
+      - operations:
+          - 'CREATE'
+        apiGroups:
+          - ''
+        apiVersions:
+          - 'v1'
+        resources:
+          - 'configmaps'
+        scope: "*"
+    failurePolicy: Fail
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        namespace: demo-webhook
+        name: demo-webhook-service
+        path: /mutating-webhook
+    timeoutSeconds: 3
+
+
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: demo-mutating-webhook-2
+webhooks:
+  - name: demo.k8s.webhook
+    matchPolicy: Equivalent
+    rules:
+      - operations:
+          - 'CREATE'
+        apiGroups:
+          - ''
+        apiVersions:
+          - 'v1'
+        resources:
+          - 'secrets'
+        scope: "*"
+    failurePolicy: Fail
+    sideEffects: None
+    admissionReviewVersions:
+      - v1
+      - v1beta1
+    clientConfig:
+      service:
+        namespace: demo-webhook
+        name: demo-webhook-service
+        path: /mutating-webhook
+    timeoutSeconds: 3

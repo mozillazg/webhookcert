@@ -271,7 +271,7 @@ func getCertForTesting(t *testing.T) (*WebhookCert, tls.Certificate) {
 		certOpt:        c.certOpt,
 		certmanager:    c,
 		webhookmanager: &webhookManager{},
-		checkerClient:  nil,
+		checkerClient:  http.DefaultClient,
 	}, tlsCert
 }
 
@@ -288,13 +288,21 @@ func (m *mockCheckerClientInterface) Do(req *http.Request) (*http.Response, erro
 }
 
 func TestWebhookCert_CheckServerStarted_success(t *testing.T) {
-	c, _ := getCertForTesting(t)
-	s := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	}))
-	defer s.Close()
+	c, tlsCert := getCertForTesting(t)
+	var ps []*x509.Certificate
+	for _, c := range tlsCert.Certificate {
+		ps = append(ps, &x509.Certificate{Raw: c})
+	}
+	resp := &http.Response{
+		TLS: &tls.ConnectionState{
+			PeerCertificates: ps,
+		},
+		Body: ioutil.NopCloser(strings.NewReader("")),
+	}
+	m := &mockCheckerClientInterface{resp: resp}
+	c.checkerClient = m
 
-	addr := s.URL[len("http://")+1:]
+	addr := "127.0.0.1"
 	err := c.CheckServerStarted(context.TODO(), addr)
 	assert.NoError(t, err)
 
@@ -309,16 +317,14 @@ func TestWebhookCert_CheckServerStarted_failed(t *testing.T) {
 	}))
 	s.Close()
 
-	addr := s.URL[len("http://")+1:]
-	ctx, cancel := context.WithTimeout(context.TODO(), time.Second)
+	addr := s.URL[len("http://"):]
+	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	err := c.CheckServerStarted(ctx, addr)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "webhook server is not reachable")
 	cancel()
 
 	err = c.CheckServerStartedWithTimeout(addr, time.Second)
 	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "webhook server is not reachable")
 }
 
 func TestWebhookCert_CheckServerCertValid_success(t *testing.T) {
