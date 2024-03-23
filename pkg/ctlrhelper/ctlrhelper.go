@@ -101,7 +101,7 @@ func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 // * ensure cert exist and mounted
 // * setup healthz and readyz
 // * registry webhooks
-func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(*webhook.Server), errC chan<- error) {
+func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(webhook.Server), errC chan<- error) {
 	webhookcert := w.ensureCertReady(ctx, errC)
 	w.setupHealthzAndReadyz(mgr, webhookcert)
 	go w.setupControllers(mgr, webhookcert, registry)
@@ -157,7 +157,7 @@ func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error) 
 	return webhookcert
 }
 
-func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.WebhookCert, registry func(*webhook.Server)) {
+func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.WebhookCert, registry func(webhook.Server)) {
 	<-w.ensureCertFinished
 
 	log.Info("registering webhooks to the webhook server")
