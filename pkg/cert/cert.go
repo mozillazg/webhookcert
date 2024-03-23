@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -211,8 +212,8 @@ func (w *WebhookCert) ensureCert(ctx context.Context) error {
 }
 
 func (w *WebhookCert) ensureCertsMounted(ctx context.Context) error {
-	checkFn := func() (bool, error) {
-		certFile := w.certOpt.CertDir + "/" + w.certOpt.SecretInfo.getCertName()
+	checkFn := func(ctx context.Context) (bool, error) {
+		certFile := filepath.Join(w.certOpt.CertDir, w.certOpt.SecretInfo.getCertName())
 		_, err := os.Stat(certFile)
 		if err == nil {
 			return true, nil
