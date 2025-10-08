@@ -186,7 +186,7 @@ func Test_injectCertToWebhook(t *testing.T) {
 			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tt.args.object)
 			wh := &unstructured.Unstructured{Object: obj}
 			assert.NoError(t, err)
-			changed, err := injectCertToWebhook(wh, tt.args.caPem)
+			changed, err := injectCertToCaBundle(wh, tt.args.caPem, ValidatingV1)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {
