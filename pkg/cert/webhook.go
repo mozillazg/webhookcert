@@ -85,8 +85,13 @@ func (w *webhookManager) ensureWebhookCA(ctx context.Context, info WebhookInfo, 
 		}
 		return err
 	}
+	var changed bool
+	if info.Type == ProviderV1Beta1 {
+		changed, err = injectCertToProvider(obj, caPem)
+	} else {
+		changed, err = injectCertToWebhook(obj, caPem)
+	}
 
-	changed, err := injectCertToCaBundle(obj, caPem, info.Type)
 	if err != nil {
 		return errors.Errorf("ensure ca for webhook %s: %w", info.Name, err)
 	}
@@ -191,68 +196,75 @@ func (t WebhookType) gvr() (*schema.GroupVersionResource, error) {
 	return nil, errors.Errorf("unknown type: %s", t)
 }
 
-func injectCertToCaBundle(wh *unstructured.Unstructured, caPem []byte, wtype WebhookType) (changed bool, err error) {
-	if wtype == ProviderV1Beta1 {
-		caBundle, found, err := unstructured.NestedString(wh.Object, "spec", "cabundle")
-		if err != nil {
-			return false, errors.Errorf(": %w", err)
-		}
-		if !found {
-			return false, errors.Errorf("`caBundle` field not found in %s", wh.GetKind())
-		}
-		var oldPem []byte
-		b, err := base64.StdEncoding.DecodeString(caBundle)
+func injectCertToProvider(wh *unstructured.Unstructured, caPem []byte) (changed bool, err error) {
+	providerSpec, found, err := unstructured.NestedMap(wh.Object, "spec")
+	if err != nil {
+		return false, errors.Errorf(": %w", err)
+	}
+	if !found {
+		return false, errors.Errorf("`webhooks` field not found in %s", wh.GetKind())
+	}
+
+	var oldPem []byte
+	oldCABundle, found, err := unstructured.NestedString(providerSpec, "caBundle")
+	if err == nil && found {
+		b, err := base64.StdEncoding.DecodeString(oldCABundle)
 		if err == nil && len(bytes.TrimSpace(b)) != 0 {
 			oldPem = b
 		}
+	}
+	ch, certPem := mergeCAPemCerts(oldPem, caPem)
+	if len(certPem) == 0 {
+		return false, errors.Errorf("caBundle is empty")
+	} else {
+		changed = ch
+	}
+	if err := unstructured.SetNestedField(providerSpec, base64.StdEncoding.EncodeToString(certPem), "caBundle"); err != nil {
+		return false, errors.Errorf(": %w", err)
+	}
+
+	if err := unstructured.SetNestedMap(wh.Object, providerSpec, "spec"); err != nil {
+		return false, errors.Errorf(": %w", err)
+	}
+	return changed, nil
+}
+
+func injectCertToWebhook(wh *unstructured.Unstructured, caPem []byte) (changed bool, err error) {
+	webhooks, found, err := unstructured.NestedSlice(wh.Object, "webhooks")
+	if err != nil {
+		return false, errors.Errorf(": %w", err)
+	}
+	if !found {
+		return false, errors.Errorf("`webhooks` field not found in %s", wh.GetKind())
+	}
+
+	for i, h := range webhooks {
+		h := h
+		hook, ok := h.(map[string]interface{})
+		if !ok {
+			return false, errors.Errorf("webhook %d is not well-formed", i)
+		}
+		var oldPem []byte
+		oldCABundle, found, err := unstructured.NestedString(hook, "clientConfig", "caBundle")
+		if err == nil && found {
+			b, err := base64.StdEncoding.DecodeString(oldCABundle)
+			if err == nil && len(bytes.TrimSpace(b)) != 0 {
+				oldPem = b
+			}
+		}
 		ch, certPem := mergeCAPemCerts(oldPem, caPem)
 		if len(certPem) == 0 || !ch {
-			return false, nil
+			continue
 		} else {
 			changed = true
 		}
-		err = unstructured.SetNestedField(wh.Object, base64.StdEncoding.EncodeToString(certPem), "spec",
-			"cabundle")
-		if err != nil {
+		if err := unstructured.SetNestedField(hook, base64.StdEncoding.EncodeToString(certPem), "clientConfig", "caBundle"); err != nil {
 			return false, errors.Errorf(": %w", err)
 		}
-	} else {
-		webhooks, found, err := unstructured.NestedSlice(wh.Object, "webhooks")
-		if err != nil {
-			return false, errors.Errorf(": %w", err)
-		}
-		if !found {
-			return false, errors.Errorf("`webhooks` field not found in %s", wh.GetKind())
-		}
-
-		for i, h := range webhooks {
-			h := h
-			hook, ok := h.(map[string]interface{})
-			if !ok {
-				return false, errors.Errorf("webhook %d is not well-formed", i)
-			}
-			var oldPem []byte
-			oldCABundle, found, err := unstructured.NestedString(hook, "clientConfig", "caBundle")
-			if err == nil && found {
-				b, err := base64.StdEncoding.DecodeString(oldCABundle)
-				if err == nil && len(bytes.TrimSpace(b)) != 0 {
-					oldPem = b
-				}
-			}
-			ch, certPem := mergeCAPemCerts(oldPem, caPem)
-			if len(certPem) == 0 || !ch {
-				continue
-			} else {
-				changed = true
-			}
-			if err := unstructured.SetNestedField(hook, base64.StdEncoding.EncodeToString(certPem), "clientConfig", "caBundle"); err != nil {
-				return false, errors.Errorf(": %w", err)
-			}
-			webhooks[i] = hook
-		}
-		if err := unstructured.SetNestedSlice(wh.Object, webhooks, "webhooks"); err != nil {
-			return false, errors.Errorf(": %w", err)
-		}
+		webhooks[i] = hook
+	}
+	if err := unstructured.SetNestedSlice(wh.Object, webhooks, "webhooks"); err != nil {
+		return false, errors.Errorf(": %w", err)
 	}
 	return changed, nil
 }
