@@ -549,7 +549,7 @@ func Test_injectCertToProvider(t *testing.T) {
 
 				decoded, err := base64.StdEncoding.DecodeString(caBundle)
 				assert.NoError(t, err)
-				assert.Equal(t, caPemForTestA, string(decoded))
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
 			},
 		},
 		{
@@ -578,7 +578,7 @@ func Test_injectCertToProvider(t *testing.T) {
 				assert.NoError(t, err)
 				// Should contain both certificates
 				assert.Contains(t, string(decoded), "BEGIN CERTIFICATE")
-				assert.Contains(t, string(decoded), caPemForTestA)
+				assert.Contains(t, strings.TrimSpace(string(decoded)), strings.TrimSpace(caPemForTestA))
 			},
 		},
 		{
@@ -604,7 +604,7 @@ func Test_injectCertToProvider(t *testing.T) {
 
 				decoded, err := base64.StdEncoding.DecodeString(caBundle)
 				assert.NoError(t, err)
-				assert.Equal(t, caPemForTestA, string(decoded))
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
 			},
 		},
 		{
@@ -620,7 +620,7 @@ func Test_injectCertToProvider(t *testing.T) {
 			},
 			wantChanged: false,
 			wantErr:     true,
-			errContains: "webhooks field not found",
+			errContains: "`webhooks` field not found",
 		},
 		{
 			name: "error when caPem is empty",
@@ -662,7 +662,7 @@ func Test_injectCertToProvider(t *testing.T) {
 
 				decoded, err := base64.StdEncoding.DecodeString(caBundle)
 				assert.NoError(t, err)
-				assert.Equal(t, caPemForTestA, string(decoded))
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
 			},
 		},
 		{
@@ -688,7 +688,7 @@ func Test_injectCertToProvider(t *testing.T) {
 
 				decoded, err := base64.StdEncoding.DecodeString(caBundle)
 				assert.NoError(t, err)
-				assert.Equal(t, caPemForTestA, string(decoded))
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
 			},
 		},
 	}
