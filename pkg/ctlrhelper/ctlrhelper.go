@@ -105,7 +105,6 @@ func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry
 	webhookcert := w.ensureCertReady(ctx, errC)
 	w.setupHealthzAndReadyz(mgr, webhookcert)
 	go w.setupControllers(mgr, webhookcert, registry)
-	return
 }
 
 // EnsureCertReady ensure cert exist and mounted

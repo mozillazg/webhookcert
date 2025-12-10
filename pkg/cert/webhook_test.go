@@ -2,6 +2,7 @@ package cert
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -211,6 +212,100 @@ func Test_injectCertToWebhook(t *testing.T) {
 	}
 }
 
+func Test_injectCertToProvider(t *testing.T) {
+	tests := []struct {
+		name         string
+		spec         map[string]interface{}
+		caPem        []byte
+		wantChanged  bool
+		wantErr      bool
+		wantCABundle string
+	}{
+		{
+			name:        "spec field missing",
+			caPem:       []byte(caPemForTestA),
+			wantChanged: false,
+			wantErr:     true,
+		},
+		{
+			name:         "inject new ca bundle",
+			spec:         map[string]interface{}{},
+			caPem:        []byte(caPemForTestA),
+			wantChanged:  true,
+			wantCABundle: caPemForTestA,
+		},
+		{
+			name: "merge with existing bundle",
+			spec: map[string]interface{}{
+				"caBundle": base64.StdEncoding.EncodeToString([]byte(caPemForTestB)),
+			},
+			caPem:       []byte(caPemForTestA),
+			wantChanged: true,
+			wantCABundle: fmt.Sprintf("%s\n%s",
+				strings.TrimSpace(caPemForTestA),
+				strings.TrimSpace(caPemForTestB)),
+		},
+		{
+			name: "ignore invalid existing base64",
+			spec: map[string]interface{}{
+				"caBundle": "!!!not-base64!!!",
+			},
+			caPem:        []byte(caPemForTestA),
+			wantChanged:  true,
+			wantCABundle: caPemForTestA,
+		},
+		{
+			name: "no change when bundle already contains cert",
+			spec: map[string]interface{}{
+				"caBundle": base64.StdEncoding.EncodeToString([]byte(caPemForTestA)),
+			},
+			caPem:        []byte(caPemForTestA),
+			wantChanged:  false,
+			wantCABundle: caPemForTestA,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := map[string]interface{}{
+				"kind":       "ClusterValidationProvider",
+				"apiVersion": "operator.alibabacloud.com/v1alpha1",
+				"metadata": map[string]interface{}{
+					"name": "test-provider",
+				},
+			}
+			if tt.spec != nil {
+				obj["spec"] = tt.spec
+			}
+			wh := &unstructured.Unstructured{Object: obj}
+
+			changed, err := injectCertToProvider(wh, tt.caPem)
+			if tt.wantErr {
+				assert.Error(t, err)
+				assert.Equal(t, tt.wantChanged, changed)
+				return
+			}
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.wantChanged, changed)
+
+			spec, found, err := unstructured.NestedMap(wh.Object, "spec")
+			assert.NoError(t, err)
+			assert.True(t, found)
+
+			cab, found, err := unstructured.NestedString(spec, "caBundle")
+			assert.NoError(t, err)
+			assert.True(t, found)
+
+			decoded, err := base64.StdEncoding.DecodeString(cab)
+			assert.NoError(t, err)
+			if tt.wantCABundle != "" {
+				assert.Equal(t, strings.TrimSpace(tt.wantCABundle), strings.TrimSpace(string(decoded)))
+			}
+		})
+	}
+}
+
 type mockResourceInterfaceData struct {
 	inputName string
 	inputData *unstructured.Unstructured
@@ -344,6 +439,7 @@ func Test_webhookManager_ensureCA_skip_update_not_found(t *testing.T) {
 	}
 	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
 	wh := &unstructured.Unstructured{Object: obj}
+	assert.NoError(t, err)
 	res := &mockResourceInterface{
 		getData: &mockResourceInterfaceData{
 			data: wh,
@@ -415,6 +511,7 @@ func Test_webhookManager_ensureCA_retry_when_update_error(t *testing.T) {
 	}
 	obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
 	wh := &unstructured.Unstructured{Object: obj}
+	assert.NoError(t, err)
 	res := &mockResourceInterface{
 		getData: &mockResourceInterfaceData{
 			data: wh,

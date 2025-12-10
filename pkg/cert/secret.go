@@ -278,7 +278,7 @@ func (s SecretInfo) getKeyName() string {
 	return keyName
 }
 
-func mergeCAPemCerts(pemCerts []byte, newPemCerts []byte) (changed bool, certs []byte) {
+func MergeCAPemCerts(pemCerts []byte, newPemCerts []byte) (changed bool, certs []byte) {
 	if bytes.Contains(pemCerts, bytes.TrimSpace(newPemCerts)) {
 		return false, pemCerts
 	}
