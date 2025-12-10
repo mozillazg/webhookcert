@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -240,4 +241,89 @@ func Test_certManager_certSecretIsValid(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMergeCAPemCerts(t *testing.T) {
+	newCA := genCACertPEM(t, "new-ca")
+	oldCA := genCACertPEM(t, "old-ca")
+
+	newRaw := mustRawCert(t, newCA)
+	oldRaw := mustRawCert(t, oldCA)
+
+	tests := []struct {
+		name          string
+		existingPEM   []byte
+		newPEM        []byte
+		wantChanged   bool
+		wantRawOrder  [][]byte
+		wantUnchanged bool
+	}{
+		{
+			name:          "skip merge when already contains new ca",
+			existingPEM:   append(append([]byte("\n"), newCA...), '\n'),
+			newPEM:        newCA,
+			wantChanged:   false,
+			wantUnchanged: true,
+		},
+		{
+			name:         "merge when no existing ca",
+			existingPEM:  nil,
+			newPEM:       newCA,
+			wantChanged:  true,
+			wantRawOrder: [][]byte{newRaw},
+		},
+		{
+			name:         "merge and keep old ca last",
+			existingPEM:  oldCA,
+			newPEM:       newCA,
+			wantChanged:  true,
+			wantRawOrder: [][]byte{newRaw, oldRaw},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			changed, merged := MergeCAPemCerts(tt.existingPEM, tt.newPEM)
+			assert.Equal(t, tt.wantChanged, changed)
+			if tt.wantUnchanged {
+				assert.Equal(t, tt.existingPEM, merged)
+				return
+			}
+
+			if len(tt.wantRawOrder) == 0 {
+				assert.NotEmpty(t, merged)
+				return
+			}
+
+			certs := decodePEMCerts(merged)
+			require.Len(t, certs.Certificate, len(tt.wantRawOrder))
+			for i, raw := range tt.wantRawOrder {
+				assert.Equal(t, raw, certs.Certificate[i])
+			}
+		})
+	}
+}
+
+func genCACertPEM(t *testing.T, commonName string) []byte {
+	t.Helper()
+	c := certManager{
+		certOpt: CertOption{
+			CAName:               commonName,
+			CAOrganizations:      []string{"org"},
+			Hosts:                []string{"example.com"},
+			CommonName:           commonName,
+			CertValidityDuration: 0,
+		},
+	}
+	now := time.Now()
+	kp, err := c.createCACert(now.Add(-time.Hour), now.Add(time.Hour))
+	require.NoError(t, err)
+	return kp.certPEM
+}
+
+func mustRawCert(t *testing.T, pem []byte) []byte {
+	t.Helper()
+	certs := decodePEMCerts(pem)
+	require.NotEmpty(t, certs.Certificate)
+	return certs.Certificate[0]
 }
