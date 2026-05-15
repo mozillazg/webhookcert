@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mozillazg/pkiutil/pkg/decoder"
 	errors "golang.org/x/xerrors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -36,6 +37,8 @@ type CertOption struct {
 	CertDir string
 	// cert will be expired after this duration, default: 100 years
 	CertValidityDuration time.Duration
+	// SkipSecretReadWrite skips Kubernetes Secret get/create/update and reads CA from CertDir instead.
+	SkipSecretReadWrite bool
 	// Deprecated: use Organizations instead
 	CAOrganizations []string
 	// Deprecated: user Hosts instead
@@ -57,12 +60,16 @@ type checkerClientInterface interface {
 }
 
 func NewWebhookCert(certOpt CertOption, webhooks []WebhookInfo, kubeclient kubernetes.Interface, dyclient dynamic.Interface) *WebhookCert {
+	var secretClient secretInterface
+	if !certOpt.SkipSecretReadWrite && kubeclient != nil {
+		secretClient = kubeclient.CoreV1().Secrets(certOpt.SecretInfo.Namespace)
+	}
 	return &WebhookCert{
 		certOpt: certOpt,
 		certmanager: &certManager{
 			secretInfo:   certOpt.SecretInfo,
 			certOpt:      certOpt,
-			secretClient: kubeclient.CoreV1().Secrets(certOpt.SecretInfo.Namespace),
+			secretClient: secretClient,
 		},
 		webhookmanager: newWebhookManager(webhooks, dyclient),
 		checkerClient: &http.Client{Transport: &http.Transport{
@@ -195,6 +202,18 @@ func (w *WebhookCert) CheckServerCertValid(ctx context.Context, addr string) err
 }
 
 func (w *WebhookCert) ensureCert(ctx context.Context) error {
+	if w.certOpt.SkipSecretReadWrite {
+		caPEM, err := w.loadCAPEMFromCertDir()
+		if err != nil {
+			return errors.Errorf("load ca from cert dir: %w", err)
+		}
+		err = w.webhookmanager.ensureCA(ctx, caPEM)
+		if err == nil {
+			klog.Info("ensure webhook ca config success")
+		}
+		return err
+	}
+
 	secret, err := w.certmanager.ensureSecret(ctx)
 	if err != nil {
 		return errors.Errorf("ensure secret: %w", err)
@@ -211,14 +230,38 @@ func (w *WebhookCert) ensureCert(ctx context.Context) error {
 	return err
 }
 
+func (w *WebhookCert) loadCAPEMFromCertDir() ([]byte, error) {
+	caFile := filepath.Join(w.certOpt.CertDir, w.certOpt.SecretInfo.getCACertName())
+	caPEM, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, errors.Errorf("read %s: %w", caFile, err)
+	}
+	if _, _, err := decoder.DecodePemCert(caPEM); err != nil {
+		return nil, errors.Errorf("parse %s: %w", caFile, err)
+	}
+	return caPEM, nil
+}
+
 func (w *WebhookCert) ensureCertsMounted(ctx context.Context) error {
+	var lastErr error
 	checkFn := func(ctx context.Context) (bool, error) {
-		certFile := filepath.Join(w.certOpt.CertDir, w.certOpt.SecretInfo.getCertName())
-		_, err := os.Stat(certFile)
-		if err == nil {
-			return true, nil
+		certFiles := []string{w.certOpt.SecretInfo.getCertName()}
+		if w.certOpt.SkipSecretReadWrite {
+			certFiles = append(certFiles, w.certOpt.SecretInfo.getCACertName(), w.certOpt.SecretInfo.getKeyName())
 		}
-		return false, nil
+		for _, name := range certFiles {
+			certFile := filepath.Join(w.certOpt.CertDir, name)
+			_, err := os.Stat(certFile)
+			if err != nil {
+				if os.IsNotExist(err) {
+					lastErr = errors.Errorf("%s does not exist", certFile)
+					return false, nil
+				}
+				return false, errors.Errorf("stat %s: %w", certFile, err)
+			}
+		}
+		lastErr = nil
+		return true, nil
 	}
 	if err := wait.ExponentialBackoffWithContext(ctx, wait.Backoff{
 		Duration: 1 * time.Second,
@@ -226,6 +269,9 @@ func (w *WebhookCert) ensureCertsMounted(ctx context.Context) error {
 		Jitter:   1,
 		Steps:    10,
 	}, checkFn); err != nil {
+		if lastErr != nil {
+			return errors.Errorf("max retries for checking certs existence: %w", lastErr)
+		}
 		return errors.Errorf("max retries for checking certs existence: %w", err)
 	}
 

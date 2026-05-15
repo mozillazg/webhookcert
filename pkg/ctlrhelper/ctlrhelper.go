@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	ctlrlog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -41,6 +42,12 @@ type Option struct {
 	DnsName       string
 	Organizations []string
 	Hosts         []string
+	// SkipSecretReadWrite skips Kubernetes Secret get/create/update and reads CA from CertDir instead.
+	SkipSecretReadWrite bool
+	CACertName          string
+	CAKeyName           string
+	CertName            string
+	KeyName             string
 
 	Webhooks                     []cert.WebhookInfo
 	TimeoutForEnsureCertReady    time.Duration
@@ -87,7 +94,7 @@ func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 		dnsName := fmt.Sprintf("%s.%s.svc", opt.ServiceName, opt.Namespace)
 		w.opt.DnsName = dnsName
 	}
-	if w.opt.kubeClient == nil {
+	if !w.opt.SkipSecretReadWrite && w.opt.kubeClient == nil {
 		w.opt.kubeClient = kubernetes.NewForConfigOrDie(config.GetConfigOrDie())
 	}
 	if w.opt.dynamicClient == nil {
@@ -125,14 +132,19 @@ func (w *WebhookHelper) EnsureCertReady(ctx context.Context) error {
 
 func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error) *cert.WebhookCert {
 	webhookcert := cert.NewWebhookCert(cert.CertOption{
-		CAName:        w.opt.ServiceName,
-		Organizations: w.opt.Organizations,
-		Hosts:         w.opt.Hosts,
-		CommonName:    w.opt.DnsName,
-		CertDir:       w.opt.CertDir,
+		CAName:              w.opt.ServiceName,
+		Organizations:       w.opt.Organizations,
+		Hosts:               w.opt.Hosts,
+		CommonName:          w.opt.DnsName,
+		CertDir:             w.opt.CertDir,
+		SkipSecretReadWrite: w.opt.SkipSecretReadWrite,
 		SecretInfo: cert.SecretInfo{
-			Name:      w.opt.SecretName,
-			Namespace: w.opt.Namespace,
+			Name:       w.opt.SecretName,
+			Namespace:  w.opt.Namespace,
+			CACertName: w.opt.CACertName,
+			CAKeyName:  w.opt.CAKeyName,
+			CertName:   w.opt.CertName,
+			KeyName:    w.opt.KeyName,
 		},
 	}, w.opt.Webhooks, w.opt.kubeClient, w.opt.dynamicClient)
 
@@ -210,7 +222,7 @@ func (w *WebhookHelper) setupHealthzAndReadyz(mgr manager.Manager, webhookcert *
 }
 
 func (o *Option) ValidateAndFillDefaultValues() error {
-	if o.SecretName == "" {
+	if !o.SkipSecretReadWrite && o.SecretName == "" {
 		return errors.New("the SecretName field can not be empty")
 	}
 	if o.Namespace == "" {
@@ -245,12 +257,17 @@ func (o *Option) ValidateAndFillDefaultValues() error {
 		o.TimeoutForCheckServerStarted = defaultTimeoutForCheckServerStarted
 	}
 
-	conf, err := config.GetConfig()
-	if err != nil {
-		log.Error(err, "unable to get kubeconfig")
-		return err
+	var conf *rest.Config
+	var err error
+	confNeeded := (!o.SkipSecretReadWrite && o.kubeClient == nil) || o.dynamicClient == nil
+	if confNeeded {
+		conf, err = config.GetConfig()
+		if err != nil {
+			log.Error(err, "unable to get kubeconfig")
+			return err
+		}
 	}
-	if o.kubeClient == nil {
+	if !o.SkipSecretReadWrite && o.kubeClient == nil {
 		o.kubeClient, err = kubernetes.NewForConfig(conf)
 		if err != nil {
 			log.Error(err, "unable creates a new kubernetes.Interface for the given config")

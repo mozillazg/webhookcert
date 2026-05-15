@@ -41,10 +41,10 @@ type SecretInfo struct {
 	Name      string
 	Namespace string
 
-	caCertName string
-	caKeyName  string
-	certName   string
-	keyName    string
+	CACertName string
+	CAKeyName  string
+	CertName   string
+	KeyName    string
 
 	// dont save ca key to secret?
 	dontSaveCaKey bool
@@ -145,7 +145,7 @@ func (c *certManager) populateSecret(cert, key []byte, caArtifacts *keyPairArtif
 func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairArtifacts, error) {
 	caPem, ok := secret.Data[c.secretInfo.getCACertName()]
 	if !ok {
-		return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
+		return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.getCACertName()))
 	}
 	caCert, _, err := decoder.DecodePemCert(caPem)
 	if err != nil {
@@ -159,7 +159,7 @@ func (c *certManager) buildArtifactsFromSecret(secret *corev1.Secret) (*keyPairA
 	if !c.secretInfo.dontSaveCaKey {
 		keyPem, ok := secret.Data[c.secretInfo.getCAKeyName()]
 		if !ok {
-			return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caKeyName))
+			return nil, errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.getCAKeyName()))
 		}
 		key, _, err := decoder.DecodePemPrivateKey(keyPem)
 		if err != nil {
@@ -179,11 +179,11 @@ func (c *certManager) certSecretIsValid(secret *corev1.Secret, now, notAfter tim
 	caCert := ca.cert
 	serverPem, ok := secret.Data[c.secretInfo.getCertName()]
 	if !ok {
-		return errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
+		return errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.getCertName()))
 	}
 	serverKey, ok := secret.Data[c.secretInfo.getKeyName()]
 	if !ok {
-		return errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.caCertName))
+		return errors.New(fmt.Sprintf("Cert secret is not well-formed, missing %s", c.secretInfo.getKeyName()))
 	}
 	serverCert, _, err := decoder.DecodePemCert(serverPem)
 	if err != nil {
@@ -251,29 +251,29 @@ func (c *certManager) createCertPEM(ca *keyPairArtifacts, begin, end time.Time) 
 }
 
 func (s SecretInfo) getCACertName() string {
-	if s.caCertName != "" {
-		return s.caCertName
+	if s.CACertName != "" {
+		return s.CACertName
 	}
 	return caCertName
 }
 
 func (s SecretInfo) getCAKeyName() string {
-	if s.caKeyName != "" {
-		return s.caKeyName
+	if s.CAKeyName != "" {
+		return s.CAKeyName
 	}
 	return caKeyName
 }
 
 func (s SecretInfo) getCertName() string {
-	if s.certName != "" {
-		return s.certName
+	if s.CertName != "" {
+		return s.CertName
 	}
 	return certName
 }
 
 func (s SecretInfo) getKeyName() string {
-	if s.keyName != "" {
-		return s.keyName
+	if s.KeyName != "" {
+		return s.KeyName
 	}
 	return keyName
 }

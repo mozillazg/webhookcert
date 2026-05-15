@@ -57,6 +57,115 @@ func TestWebhookCert_ensureCert(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestWebhookCert_ensureCert_skipSecretReadWrite(t *testing.T) {
+	certDir, err := os.MkdirTemp(os.TempDir(), "test-webhookcert")
+	assert.NoError(t, err)
+	defer os.RemoveAll(certDir)
+
+	secretInfo := SecretInfo{
+		CACertName: "ca.crt",
+		CertName:   "cert.crt",
+		KeyName:    "cert.key",
+	}
+	err = ioutil.WriteFile(path.Join(certDir, secretInfo.getCACertName()), []byte(caPemForTestA), 0644)
+	assert.NoError(t, err)
+
+	object := &v1.ValidatingWebhookConfiguration{
+		ObjectMeta: metav1.ObjectMeta{Name: "test"},
+		Webhooks: []v1.ValidatingWebhook{
+			{
+				Name: "test1",
+			},
+		},
+	}
+	obj, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(object)
+	wh := &unstructured.Unstructured{Object: obj}
+	res := &mockResourceInterface{
+		getData: &mockResourceInterfaceData{
+			data: wh,
+		},
+		updateData: &mockResourceInterfaceData{
+			data: wh,
+		},
+	}
+	secretClient := &FakeSecretInterface{}
+	w := &WebhookCert{
+		certOpt: CertOption{
+			CertDir:             certDir,
+			SkipSecretReadWrite: true,
+			SecretInfo:          secretInfo,
+		},
+		certmanager: &certManager{
+			secretInfo:   secretInfo,
+			secretClient: secretClient,
+		},
+		webhookmanager: &webhookManager{
+			webhooks: []WebhookInfo{
+				{
+					Type: ValidatingV1,
+					Name: "test",
+				},
+			},
+			resourceClientGetter: func(resource schema.GroupVersionResource) resourceInterface {
+				return res
+			},
+		},
+	}
+
+	err = w.ensureCert(context.TODO())
+	assert.NoError(t, err)
+	assert.Equal(t, 0, secretClient.getCalls)
+	assert.Equal(t, 0, secretClient.createCalls)
+	assert.Equal(t, 0, secretClient.updateCalls)
+	assert.Equal(t, 1, res.updateData.callCount)
+}
+
+func TestWebhookCert_loadCAPEMFromCertDir_invalid(t *testing.T) {
+	certDir, err := os.MkdirTemp(os.TempDir(), "test-webhookcert")
+	assert.NoError(t, err)
+	defer os.RemoveAll(certDir)
+
+	secretInfo := SecretInfo{CACertName: "custom-ca.crt"}
+	err = ioutil.WriteFile(path.Join(certDir, secretInfo.getCACertName()), []byte("invalid"), 0644)
+	assert.NoError(t, err)
+	w := &WebhookCert{
+		certOpt: CertOption{
+			CertDir:    certDir,
+			SecretInfo: secretInfo,
+		},
+	}
+
+	_, err = w.loadCAPEMFromCertDir()
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "custom-ca.crt")
+}
+
+func TestWebhookCert_ensureCertsMounted_customNames(t *testing.T) {
+	certDir, err := os.MkdirTemp(os.TempDir(), "test-webhookcert")
+	assert.NoError(t, err)
+	defer os.RemoveAll(certDir)
+
+	secretInfo := SecretInfo{
+		CACertName: "ca.crt",
+		CertName:   "cert.crt",
+		KeyName:    "cert.key",
+	}
+	for _, name := range []string{secretInfo.getCACertName(), secretInfo.getCertName(), secretInfo.getKeyName()} {
+		err = ioutil.WriteFile(path.Join(certDir, name), []byte("test"), 0644)
+		assert.NoError(t, err)
+	}
+	w := &WebhookCert{
+		certOpt: CertOption{
+			CertDir:             certDir,
+			SkipSecretReadWrite: true,
+			SecretInfo:          secretInfo,
+		},
+	}
+
+	err = w.ensureCertsMounted(context.TODO())
+	assert.NoError(t, err)
+}
+
 func TestCertOption_getCertValidityDuration(t *testing.T) {
 	type fields struct {
 		CertValidityDuration time.Duration

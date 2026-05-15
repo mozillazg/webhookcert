@@ -18,19 +18,25 @@ type FakeSecretInterface struct {
 	getSecretErr    error
 
 	gotUpdateSecret *corev1.Secret
+	createCalls     int
+	updateCalls     int
+	getCalls        int
 }
 
 func (f *FakeSecretInterface) Create(ctx context.Context, secret *corev1.Secret, opts metav1.CreateOptions) (*corev1.Secret, error) {
+	f.createCalls++
 	f.gotCreateSecret = secret
 	return f.gotCreateSecret, nil
 }
 
 func (f *FakeSecretInterface) Update(ctx context.Context, secret *corev1.Secret, opts metav1.UpdateOptions) (*corev1.Secret, error) {
+	f.updateCalls++
 	f.gotUpdateSecret = secret
 	return f.gotUpdateSecret, nil
 }
 
 func (f *FakeSecretInterface) Get(ctx context.Context, name string, opts metav1.GetOptions) (*corev1.Secret, error) {
+	f.getCalls++
 	if f.getSecretErr != nil {
 		return nil, f.getSecretErr
 	}

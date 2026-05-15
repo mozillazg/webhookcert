@@ -9,3 +9,5 @@ require (
 	k8s.io/client-go v0.27.2
 	sigs.k8s.io/controller-runtime v0.15.0
 )
+
+replace github.com/mozillazg/webhookcert => ../..

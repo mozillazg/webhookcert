@@ -92,6 +92,25 @@ func setupWebhook(ctx context.Context, mgr manager.Manager, errC chan<- error) {
 
 ```
 
+If you want to skip Secret changes and the mounted Secret already contains the
+required certificate files, set `SkipSecretReadWrite` to skip Kubernetes Secret
+`get`, `create`, and `update` calls while still patching webhook `caBundle` from
+the mounted CA:
+
+```go
+opt := ctlrhelper.Option{
+	Namespace:           namespace,
+	ServiceName:         serviceName,
+	CertDir:             certDir,
+	SkipSecretReadWrite: true,
+	CACertName:          "ca.crt",
+	CertName:            "cert.crt",
+	KeyName:             "cert.key",
+	WebhookServerPort:   port,
+	Webhooks:            webhooks,
+}
+```
+
 Real world example: [main.go](https://github.com/mozillazg/echo-k8s-webhook/blob/master/main.go)
 
 ## Permissions
