@@ -25,6 +25,8 @@ var (
 	defaultTimeoutForEnsureCertReady    = time.Minute * 5
 	defaultTimeoutForCheckServerCert    = time.Second * 3
 	defaultTimeoutForCheckServerStarted = time.Second * 3
+	defaultHealthzCheckName             = "webhook"
+	defaultReadyzCheckName              = "webhook"
 )
 
 type Option struct {
@@ -53,6 +55,8 @@ type Option struct {
 	TimeoutForEnsureCertReady    time.Duration
 	TimeoutForCheckServerStarted time.Duration
 	TimeoutForCheckServerCert    time.Duration
+	HealthzCheckName             string
+	ReadyzCheckName              string
 
 	kubeClient    kubernetes.Interface
 	dynamicClient dynamic.Interface
@@ -88,11 +92,19 @@ func NewNewWebhookHelperOrDie(opt Option) *WebhookHelper {
 
 func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 	w := &WebhookHelper{
-		opt: opt,
+		opt:                opt,
+		ensureCertFinished: make(chan struct{}),
+		webhookReady:       make(chan struct{}),
 	}
 	if w.opt.DnsName == "" {
 		dnsName := fmt.Sprintf("%s.%s.svc", opt.ServiceName, opt.Namespace)
 		w.opt.DnsName = dnsName
+	}
+	if w.opt.HealthzCheckName == "" {
+		w.opt.HealthzCheckName = defaultHealthzCheckName
+	}
+	if w.opt.ReadyzCheckName == "" {
+		w.opt.ReadyzCheckName = defaultReadyzCheckName
 	}
 	if !w.opt.SkipSecretReadWrite && w.opt.kubeClient == nil {
 		w.opt.kubeClient = kubernetes.NewForConfigOrDie(config.GetConfigOrDie())
@@ -102,6 +114,14 @@ func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
 	}
 
 	return w
+}
+
+func (w *WebhookHelper) EnsureCertFinished() <-chan struct{} {
+	return w.ensureCertFinished
+}
+
+func (w *WebhookHelper) WebhookReady() <-chan struct{} {
+	return w.webhookReady
 }
 
 // Setup is a non-block method
@@ -196,7 +216,7 @@ func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.
 
 func (w *WebhookHelper) setupHealthzAndReadyz(mgr manager.Manager, webhookcert *cert.WebhookCert) {
 	addr := fmt.Sprintf("127.0.0.1:%d", w.opt.WebhookServerPort)
-	_ = mgr.AddHealthzCheck("webhook", func(_ *http.Request) error {
+	_ = mgr.AddHealthzCheck(w.opt.HealthzCheckName, func(_ *http.Request) error {
 		select {
 		case <-w.webhookReady:
 		default:
@@ -210,7 +230,7 @@ func (w *WebhookHelper) setupHealthzAndReadyz(mgr manager.Manager, webhookcert *
 		return err
 	})
 
-	_ = mgr.AddReadyzCheck("webhook", func(_ *http.Request) error {
+	_ = mgr.AddReadyzCheck(w.opt.ReadyzCheckName, func(_ *http.Request) error {
 		select {
 		case <-w.webhookReady:
 			err := webhookcert.CheckServerStartedWithTimeout(addr, w.opt.TimeoutForCheckServerStarted)
@@ -255,6 +275,12 @@ func (o *Option) ValidateAndFillDefaultValues() error {
 	}
 	if o.TimeoutForCheckServerStarted == 0 {
 		o.TimeoutForCheckServerStarted = defaultTimeoutForCheckServerStarted
+	}
+	if o.HealthzCheckName == "" {
+		o.HealthzCheckName = defaultHealthzCheckName
+	}
+	if o.ReadyzCheckName == "" {
+		o.ReadyzCheckName = defaultReadyzCheckName
 	}
 
 	var conf *rest.Config
