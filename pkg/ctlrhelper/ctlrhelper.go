@@ -65,8 +65,8 @@ type Option struct {
 	HealthzCheckName             string
 	ReadyzCheckName              string
 
-	kubeClient    kubernetes.Interface
-	dynamicClient dynamic.Interface
+	KubeClient    kubernetes.Interface
+	DynamicClient dynamic.Interface
 }
 
 type WebhookHelper struct {
@@ -151,7 +151,7 @@ func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error) 
 			CertName:   w.opt.CertName,
 			KeyName:    w.opt.KeyName,
 		},
-	}, w.opt.Webhooks, w.opt.kubeClient, w.opt.dynamicClient)
+	}, w.opt.Webhooks, w.opt.KubeClient, w.opt.DynamicClient)
 
 	go func() {
 		ctxWithTimeout, cancel := context.WithTimeout(ctx, w.opt.TimeoutForEnsureCertReady)
@@ -274,7 +274,7 @@ func (o *Option) ValidateAndFillDefaultValues() error {
 
 	var conf *rest.Config
 	var err error
-	confNeeded := (!o.SkipSecretReadWrite && o.kubeClient == nil) || o.dynamicClient == nil
+	confNeeded := (!o.SkipSecretReadWrite && o.KubeClient == nil) || o.DynamicClient == nil
 	if confNeeded {
 		conf, err = config.GetConfig()
 		if err != nil {
@@ -282,15 +282,15 @@ func (o *Option) ValidateAndFillDefaultValues() error {
 			return err
 		}
 	}
-	if !o.SkipSecretReadWrite && o.kubeClient == nil {
-		o.kubeClient, err = kubernetes.NewForConfig(conf)
+	if !o.SkipSecretReadWrite && o.KubeClient == nil {
+		o.KubeClient, err = kubernetes.NewForConfig(conf)
 		if err != nil {
 			log.Error(err, "unable creates a new kubernetes.Interface for the given config")
 			return err
 		}
 	}
-	if o.dynamicClient == nil {
-		o.dynamicClient, err = dynamic.NewForConfig(conf)
+	if o.DynamicClient == nil {
+		o.DynamicClient, err = dynamic.NewForConfig(conf)
 		if err != nil {
 			log.Error(err, "unable creates a new dynamic.Interface for the given config")
 			return err

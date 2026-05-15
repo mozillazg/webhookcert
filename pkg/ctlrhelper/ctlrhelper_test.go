@@ -18,7 +18,7 @@ func TestOption_ValidateAndFillDefaultValues_skipSecretReadWrite(t *testing.T) {
 		CertDir:             "/certs",
 		WebhookServerPort:   9443,
 		SkipSecretReadWrite: true,
-		dynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
+		DynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
 	}
 
 	if err := opt.ValidateAndFillDefaultValues(); err != nil {
@@ -30,8 +30,8 @@ func TestOption_ValidateAndFillDefaultValues_skipSecretReadWrite(t *testing.T) {
 	if opt.DnsName != "webhook.default.svc" {
 		t.Fatalf("DnsName = %q, want webhook.default.svc", opt.DnsName)
 	}
-	if opt.kubeClient != nil {
-		t.Fatal("kubeClient should not be initialized when SkipSecretReadWrite is true")
+	if opt.KubeClient != nil {
+		t.Fatal("KubeClient should not be initialized when SkipSecretReadWrite is true")
 	}
 	if opt.HealthzCheckName != defaultHealthzCheckName {
 		t.Fatalf("HealthzCheckName = %q, want %q", opt.HealthzCheckName, defaultHealthzCheckName)
@@ -47,8 +47,8 @@ func TestOption_ValidateAndFillDefaultValues_requireSecretName(t *testing.T) {
 		ServiceName:       "webhook",
 		CertDir:           "/certs",
 		WebhookServerPort: 9443,
-		kubeClient:        kubernetesfake.NewSimpleClientset(),
-		dynamicClient:     dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
+		KubeClient:        kubernetesfake.NewSimpleClientset(),
+		DynamicClient:     dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
 	}
 
 	err := opt.ValidateAndFillDefaultValues()
@@ -69,7 +69,7 @@ func TestOption_ValidateAndFillDefaultValues_customCheckNames(t *testing.T) {
 		SkipSecretReadWrite: true,
 		HealthzCheckName:    "webhook-cert",
 		ReadyzCheckName:     "webhook-server",
-		dynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
+		DynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
 	}
 
 	if err := opt.ValidateAndFillDefaultValues(); err != nil {
@@ -90,7 +90,7 @@ func TestWebhookHelper_ReadyChannels(t *testing.T) {
 		CertDir:             "/certs",
 		WebhookServerPort:   9443,
 		SkipSecretReadWrite: true,
-		dynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
+		DynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
 	}
 	h, err := NewNewWebhookHelper(opt)
 	if err != nil {
@@ -112,7 +112,7 @@ func TestNewWebhookHelperOrDie_initializesReadyChannelsAndCheckNames(t *testing.
 		CertDir:             "/certs",
 		WebhookServerPort:   9443,
 		SkipSecretReadWrite: true,
-		dynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
+		DynamicClient:       dynamicfake.NewSimpleDynamicClient(runtime.NewScheme()),
 	}
 	h := NewWebhookHelperOrDie(opt)
 
