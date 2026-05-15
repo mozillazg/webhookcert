@@ -2,8 +2,11 @@ package ctlrhelper
 
 import (
 	"testing"
+	"time"
 
+	"github.com/mozillazg/webhookcert/pkg/cert"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/wait"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubernetesfake "k8s.io/client-go/kubernetes/fake"
 )
@@ -124,5 +127,50 @@ func TestNewWebhookHelperOrDie_initializesReadyChannelsAndCheckNames(t *testing.
 	}
 	if h.opt.ReadyzCheckName != defaultReadyzCheckName {
 		t.Fatalf("ReadyzCheckName = %q, want %q", h.opt.ReadyzCheckName, defaultReadyzCheckName)
+	}
+	if h.opt.TimeoutForEnsureCertReady != defaultTimeoutForEnsureCertReady {
+		t.Fatalf("TimeoutForEnsureCertReady = %s, want %s", h.opt.TimeoutForEnsureCertReady, defaultTimeoutForEnsureCertReady)
+	}
+	if h.opt.TimeoutForCheckServerStarted != defaultTimeoutForCheckServerStarted {
+		t.Fatalf("TimeoutForCheckServerStarted = %s, want %s", h.opt.TimeoutForCheckServerStarted, defaultTimeoutForCheckServerStarted)
+	}
+	if h.opt.TimeoutForCheckServerCert != defaultTimeoutForCheckServerCert {
+		t.Fatalf("TimeoutForCheckServerCert = %s, want %s", h.opt.TimeoutForCheckServerCert, defaultTimeoutForCheckServerCert)
+	}
+}
+
+func TestWebhookHelper_markWebhookReadyWhenStarted_error(t *testing.T) {
+	oldBackoff := defaultBackoffForCheckServerStarted
+	defaultBackoffForCheckServerStarted = wait.Backoff{
+		Steps:    1,
+		Duration: time.Millisecond,
+	}
+	defer func() {
+		defaultBackoffForCheckServerStarted = oldBackoff
+	}()
+
+	h := &WebhookHelper{
+		opt: Option{
+			TimeoutForCheckServerStarted: time.Millisecond,
+		},
+		webhookReady: make(chan struct{}),
+	}
+	errC := make(chan error, 1)
+
+	h.markWebhookReadyWhenStarted(&cert.WebhookCert{}, "127.0.0.1:1", errC)
+
+	select {
+	case err := <-errC:
+		if err == nil {
+			t.Fatal("got nil error")
+		}
+	default:
+		t.Fatal("expected startup error")
+	}
+
+	select {
+	case <-h.WebhookReady():
+		t.Fatal("WebhookReady() was closed after startup failure")
+	default:
 	}
 }

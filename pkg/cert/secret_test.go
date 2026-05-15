@@ -134,6 +134,37 @@ func TestCertManager_ensureSecret_update_exist_secret(t *testing.T) {
 	assert.NotEqual(t, s, newS)
 }
 
+func TestCertManager_ensureSecret_update_expiring_secret(t *testing.T) {
+	secretClient := &FakeSecretInterface{}
+	c := certManager{
+		secretInfo: SecretInfo{
+			Name:      "test",
+			Namespace: "",
+		},
+		certOpt: CertOption{
+			CAName:               "ca",
+			CAOrganizations:      []string{"ca"},
+			Hosts:                []string{"example.com"},
+			CommonName:           "test",
+			CertDir:              "",
+			CertValidityDuration: time.Hour,
+		},
+		secretClient: secretClient,
+	}
+	s, err := c.ensureSecret(context.TODO())
+	assert.NoError(t, err)
+	assert.Equal(t, s, secretClient.gotCreateSecret)
+
+	secretClient.getSecret = s.DeepCopy()
+	secretClient.gotCreateSecret = nil
+	secretClient.gotUpdateSecret = nil
+	newS, err := c.ensureSecret(context.TODO())
+	assert.NoError(t, err)
+	assert.NotNil(t, newS)
+	assert.NotNil(t, secretClient.gotUpdateSecret)
+	assert.Equal(t, 1, secretClient.updateCalls)
+}
+
 func Test_certManager_certSecretIsValid(t *testing.T) {
 	secretClient := &FakeSecretInterface{}
 	c := certManager{
@@ -156,6 +187,7 @@ func Test_certManager_certSecretIsValid(t *testing.T) {
 		now    time.Time
 	}
 	validSecret, _ := c.newSecret()
+	otherSecret, _ := c.newSecret()
 
 	invalidSecretWithoutCa := validSecret.DeepCopy()
 	delete(invalidSecretWithoutCa.Data, c.secretInfo.getCACertName())
@@ -171,6 +203,10 @@ func Test_certManager_certSecretIsValid(t *testing.T) {
 	delete(invalidSecretWithoutKey.Data, c.secretInfo.getKeyName())
 	invalidSecretWithInvalidKey := validSecret.DeepCopy()
 	invalidSecretWithInvalidKey.Data[c.secretInfo.getKeyName()] = []byte("xxx")
+	invalidSecretWithMismatchedKey := validSecret.DeepCopy()
+	invalidSecretWithMismatchedKey.Data[c.secretInfo.getKeyName()] = otherSecret.Data[c.secretInfo.getKeyName()]
+	invalidSecretWithMismatchedCa := validSecret.DeepCopy()
+	invalidSecretWithMismatchedCa.Data[c.secretInfo.getCACertName()] = otherSecret.Data[c.secretInfo.getCACertName()]
 
 	tests := []struct {
 		name    string
@@ -231,6 +267,20 @@ func Test_certManager_certSecretIsValid(t *testing.T) {
 			name: "invalid: invalid key",
 			args: args{
 				secret: invalidSecretWithInvalidKey,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: mismatched key",
+			args: args{
+				secret: invalidSecretWithMismatchedKey,
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid: mismatched ca",
+			args: args{
+				secret: invalidSecretWithMismatchedCa,
 			},
 			wantErr: true,
 		},

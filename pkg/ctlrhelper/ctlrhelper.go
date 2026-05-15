@@ -27,6 +27,13 @@ var (
 	defaultTimeoutForCheckServerStarted = time.Second * 3
 	defaultHealthzCheckName             = "webhook"
 	defaultReadyzCheckName              = "webhook"
+	defaultBackoffForCheckServerStarted = wait.Backoff{
+		Steps:    10,
+		Duration: 500 * time.Millisecond,
+		Factor:   3.0,
+		Jitter:   0.1,
+		Cap:      time.Second * 5,
+	}
 )
 
 type Option struct {
@@ -91,29 +98,7 @@ func NewNewWebhookHelperOrDie(opt Option) *WebhookHelper {
 }
 
 func NewWebhookHelperOrDie(opt Option) *WebhookHelper {
-	w := &WebhookHelper{
-		opt:                opt,
-		ensureCertFinished: make(chan struct{}),
-		webhookReady:       make(chan struct{}),
-	}
-	if w.opt.DnsName == "" {
-		dnsName := fmt.Sprintf("%s.%s.svc", opt.ServiceName, opt.Namespace)
-		w.opt.DnsName = dnsName
-	}
-	if w.opt.HealthzCheckName == "" {
-		w.opt.HealthzCheckName = defaultHealthzCheckName
-	}
-	if w.opt.ReadyzCheckName == "" {
-		w.opt.ReadyzCheckName = defaultReadyzCheckName
-	}
-	if !w.opt.SkipSecretReadWrite && w.opt.kubeClient == nil {
-		w.opt.kubeClient = kubernetes.NewForConfigOrDie(config.GetConfigOrDie())
-	}
-	if w.opt.dynamicClient == nil {
-		w.opt.dynamicClient = dynamic.NewForConfigOrDie(config.GetConfigOrDie())
-	}
-
-	return w
+	return NewNewWebhookHelperOrDie(opt)
 }
 
 func (w *WebhookHelper) EnsureCertFinished() <-chan struct{} {
@@ -131,7 +116,7 @@ func (w *WebhookHelper) WebhookReady() <-chan struct{} {
 func (w *WebhookHelper) Setup(ctx context.Context, mgr manager.Manager, registry func(webhook.Server), errC chan<- error) {
 	webhookcert := w.ensureCertReady(ctx, errC)
 	w.setupHealthzAndReadyz(mgr, webhookcert)
-	go w.setupControllers(mgr, webhookcert, registry)
+	go w.setupControllers(mgr, webhookcert, registry, errC)
 	return
 }
 
@@ -189,7 +174,7 @@ func (w *WebhookHelper) ensureCertReady(ctx context.Context, errC chan<- error) 
 	return webhookcert
 }
 
-func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.WebhookCert, registry func(webhook.Server)) {
+func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.WebhookCert, registry func(webhook.Server), errC chan<- error) {
 	<-w.ensureCertFinished
 
 	log.Info("registering webhooks to the webhook server")
@@ -197,21 +182,25 @@ func (w *WebhookHelper) setupControllers(mgr manager.Manager, webhookcert *cert.
 	registry(s)
 	addr := fmt.Sprintf("127.0.0.1:%d", w.opt.WebhookServerPort)
 
-	backoff := wait.Backoff{
-		Steps:    10,
-		Duration: 500 * time.Millisecond,
-		Factor:   3.0,
-		Jitter:   0.1,
-		Cap:      time.Second * 5,
+	w.markWebhookReadyWhenStarted(webhookcert, addr, errC)
+}
+
+func (w *WebhookHelper) markWebhookReadyWhenStarted(webhookcert *cert.WebhookCert, addr string, errC chan<- error) {
+	if err := w.waitWebhookServerStarted(webhookcert, addr); err != nil {
+		log.Error(err, "check webhook server started failed")
+		errC <- err
+		return
 	}
 
-	retry.OnError(backoff, func(err error) bool {
+	close(w.webhookReady)
+}
+
+func (w *WebhookHelper) waitWebhookServerStarted(webhookcert *cert.WebhookCert, addr string) error {
+	return retry.OnError(defaultBackoffForCheckServerStarted, func(err error) bool {
 		return true
 	}, func() error {
 		return webhookcert.CheckServerStartedWithTimeout(addr, w.opt.TimeoutForCheckServerStarted)
 	})
-
-	close(w.webhookReady)
 }
 
 func (w *WebhookHelper) setupHealthzAndReadyz(mgr manager.Manager, webhookcert *cert.WebhookCert) {
