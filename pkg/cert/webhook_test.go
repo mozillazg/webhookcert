@@ -2,6 +2,7 @@ package cert
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"strings"
@@ -509,5 +510,209 @@ func Test_webhookManager_watchChanges_receive_event(t *testing.T) {
 	case <-events:
 		assert.Fail(t, "should no event")
 	case <-time.After(time.Second):
+	}
+}
+
+func Test_injectCertToProvider(t *testing.T) {
+	type args struct {
+		wh    runtime.Object
+		caPem []byte
+	}
+	tests := []struct {
+		name        string
+		args        args
+		wantChanged bool
+		wantErr     bool
+		errContains string
+		validateFn  func(t *testing.T, wh *unstructured.Unstructured)
+	}{
+		{
+			name: "successful injection with no existing caBundle",
+			args: args{
+				wh: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"kind": "Provider",
+						"spec": map[string]interface{}{
+							"url": "https://example.com",
+						},
+					},
+				},
+				caPem: []byte(caPemForTestA),
+			},
+			wantChanged: true,
+			wantErr:     false,
+			validateFn: func(t *testing.T, wh *unstructured.Unstructured) {
+				caBundle, found, err := unstructured.NestedString(wh.Object, "spec", "caBundle")
+				assert.NoError(t, err)
+				assert.True(t, found)
+				assert.NotEmpty(t, caBundle)
+
+				decoded, err := base64.StdEncoding.DecodeString(caBundle)
+				assert.NoError(t, err)
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
+			},
+		},
+		{
+			name: "successful injection with existing caBundle",
+			args: args{
+				wh: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"kind": "Provider",
+						"spec": map[string]interface{}{
+							"url":      "https://example.com",
+							"caBundle": base64.StdEncoding.EncodeToString([]byte(caPemForTestB)),
+						},
+					},
+				},
+				caPem: []byte(caPemForTestA),
+			},
+			wantChanged: true,
+			wantErr:     false,
+			validateFn: func(t *testing.T, wh *unstructured.Unstructured) {
+				caBundle, found, err := unstructured.NestedString(wh.Object, "spec", "caBundle")
+				assert.NoError(t, err)
+				assert.True(t, found)
+				assert.NotEmpty(t, caBundle)
+
+				decoded, err := base64.StdEncoding.DecodeString(caBundle)
+				assert.NoError(t, err)
+				// Should contain both certificates
+				assert.Contains(t, string(decoded), "BEGIN CERTIFICATE")
+				assert.Contains(t, strings.TrimSpace(string(decoded)), strings.TrimSpace(caPemForTestA))
+			},
+		},
+		{
+			name: "no change when caBundle already contains the certificate",
+			args: args{
+				wh: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"kind": "Provider",
+						"spec": map[string]interface{}{
+							"url":      "https://example.com",
+							"caBundle": base64.StdEncoding.EncodeToString([]byte(caPemForTestA)),
+						},
+					},
+				},
+				caPem: []byte(caPemForTestA),
+			},
+			wantChanged: false,
+			wantErr:     false,
+			validateFn: func(t *testing.T, wh *unstructured.Unstructured) {
+				caBundle, found, err := unstructured.NestedString(wh.Object, "spec", "caBundle")
+				assert.NoError(t, err)
+				assert.True(t, found)
+
+				decoded, err := base64.StdEncoding.DecodeString(caBundle)
+				assert.NoError(t, err)
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
+			},
+		},
+		{
+			name: "error when spec field is missing",
+			args: args{
+				wh: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"kind": "Provider",
+						// no spec field
+					},
+				},
+				caPem: []byte(caPemForTestA),
+			},
+			wantChanged: false,
+			wantErr:     true,
+			errContains: "`webhooks` field not found",
+		},
+		{
+			name: "error when caPem is empty",
+			args: args{
+				wh: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"kind": "Provider",
+						"spec": map[string]interface{}{
+							"url": "https://example.com",
+						},
+					},
+				},
+				caPem: []byte{},
+			},
+			wantChanged: false,
+			wantErr:     true,
+			errContains: "caBundle is empty",
+		},
+		{
+			name: "successful injection with invalid base64 caBundle (should be replaced)",
+			args: args{
+				wh: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"kind": "Provider",
+						"spec": map[string]interface{}{
+							"url":      "https://example.com",
+							"caBundle": "invalid-base64",
+						},
+					},
+				},
+				caPem: []byte(caPemForTestA),
+			},
+			wantChanged: true,
+			wantErr:     false,
+			validateFn: func(t *testing.T, wh *unstructured.Unstructured) {
+				caBundle, found, err := unstructured.NestedString(wh.Object, "spec", "caBundle")
+				assert.NoError(t, err)
+				assert.True(t, found)
+
+				decoded, err := base64.StdEncoding.DecodeString(caBundle)
+				assert.NoError(t, err)
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
+			},
+		},
+		{
+			name: "successful injection with empty base64 caBundle (should be replaced)",
+			args: args{
+				wh: &unstructured.Unstructured{
+					Object: map[string]interface{}{
+						"kind": "Provider",
+						"spec": map[string]interface{}{
+							"url":      "https://example.com",
+							"caBundle": base64.StdEncoding.EncodeToString([]byte("")),
+						},
+					},
+				},
+				caPem: []byte(caPemForTestA),
+			},
+			wantChanged: true,
+			wantErr:     false,
+			validateFn: func(t *testing.T, wh *unstructured.Unstructured) {
+				caBundle, found, err := unstructured.NestedString(wh.Object, "spec", "caBundle")
+				assert.NoError(t, err)
+				assert.True(t, found)
+
+				decoded, err := base64.StdEncoding.DecodeString(caBundle)
+				assert.NoError(t, err)
+				assert.Equal(t, strings.TrimSpace(caPemForTestA), strings.TrimSpace(string(decoded)))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			obj, err := runtime.DefaultUnstructuredConverter.ToUnstructured(tt.args.wh)
+			assert.NoError(t, err)
+			wh := &unstructured.Unstructured{Object: obj}
+
+			changed, err := injectCertToProvider(wh, tt.args.caPem)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+				if tt.errContains != "" {
+					assert.Contains(t, err.Error(), tt.errContains)
+				}
+			} else {
+				assert.NoError(t, err)
+			}
+			assert.Equal(t, tt.wantChanged, changed)
+
+			if tt.validateFn != nil {
+				tt.validateFn(t, wh)
+			}
+		})
 	}
 }

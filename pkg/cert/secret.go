@@ -116,7 +116,7 @@ func (c *certManager) newSecret() (*corev1.Secret, error) {
 	if err != nil {
 		return nil, errors.Errorf("create ca cert: %w", err)
 	}
-	cert, key, err := c.createCertPEM(caArtifacts, begin, end)
+	cert, key, err := c.createDoubleCertPEM(caArtifacts, begin, end)
 	if err != nil {
 		return nil, errors.Errorf("create cert: %w", err)
 	}
@@ -230,6 +230,31 @@ func (c *certManager) createCACert(begin, end time.Time) (*keyPairArtifacts, err
 		return nil, errors.Errorf("encoding PEM: %w", err)
 	}
 	return &keyPairArtifacts{cert: cert, key: key, certPEM: certPem, keyPEM: keyPem}, nil
+}
+
+func (c *certManager) createDoubleCertPEM(ca *keyPairArtifacts, begin, end time.Time) ([]byte, []byte, error) {
+	cert, key, err := certgen.GenDoubleEndCert(certgen.CertOption{
+		CommonName:    c.certOpt.CommonName,
+		Organizations: c.certOpt.getOrganizations(),
+		Hosts:         c.certOpt.getHots(),
+		NotBefore:     begin,
+		NotAfter:      end,
+		RSAKeySize:    c.certOpt.getRSAKeySize(),
+		ParentCert:    ca.cert,
+		ParentKey:     ca.key,
+	})
+	if err != nil {
+		return nil, nil, errors.Errorf("generating cert: %w", err)
+	}
+	certPem, err := encoder.PemEncodeCert(cert)
+	if err != nil {
+		return nil, nil, errors.Errorf("encoding PEM: %w", err)
+	}
+	keyPem, err := encoder.PemEncodePrivateKey(key)
+	if err != nil {
+		return nil, nil, errors.Errorf("encoding PEM: %w", err)
+	}
+	return certPem, keyPem, nil
 }
 
 func (c *certManager) createCertPEM(ca *keyPairArtifacts, begin, end time.Time) ([]byte, []byte, error) {
